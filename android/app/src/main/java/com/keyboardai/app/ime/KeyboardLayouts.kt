@@ -18,6 +18,10 @@ data class Key(
     val code: Int,
     val label: String,
     val widthWeight: Float = 1f,
+    /** Small label drawn in the key's top-right corner. */
+    val hint: String? = null,
+    /** Characters offered in the long-press popup. */
+    val alternates: List<String> = emptyList(),
 )
 
 /** Rows narrower than the widest row are centered by the view. */
@@ -25,7 +29,25 @@ data class KeyboardLayer(val rows: List<List<Key>>)
 
 object KeyboardLayouts {
 
-    private fun charKey(c: Char) = Key(c.code, c.toString())
+    private val accents = mapOf(
+        'a' to "àáâäãåā",
+        'c' to "çć",
+        'e' to "èéêëēę",
+        'g' to "ğ",
+        'i' to "ìíîïī",
+        'n' to "ñń",
+        'o' to "òóôöõø",
+        's' to "śš",
+        'u' to "ùúûüū",
+        'y' to "ÿý",
+        'z' to "žźż",
+    )
+
+    private fun charKey(c: Char) = Key(
+        code = c.code,
+        label = c.toString(),
+        alternates = accents[c]?.map { it.toString() } ?: emptyList(),
+    )
 
     private fun charRow(chars: String): List<Key> = chars.map { charKey(it) }
 
@@ -39,12 +61,24 @@ object KeyboardLayouts {
     private val toSymbols2 = Key(KeyCodes.SYM_SHIFT, "=\\<", 1.5f)
     private val toSymbols1 = Key(KeyCodes.SYM_SHIFT, "?123", 1.5f)
 
+    private val comma = Key(
+        ','.code, ",",
+        hint = "!",
+        alternates = listOf("!", ";", ":", "'", "\""),
+    )
+    private val period = Key(
+        '.'.code, ".",
+        hint = "?",
+        alternates = listOf("?", "!", "…", ",", "-"),
+    )
+
     val LETTERS = KeyboardLayer(
         listOf(
+            charRow("1234567890"),
             charRow("qwertyuiop"),
             charRow("asdfghjkl"),
             listOf(shift) + charRow("zxcvbnm") + listOf(delete),
-            listOf(toSymbols, charKey(','), lang, space, charKey('.'), enter),
+            listOf(toSymbols, comma, lang, space, period, enter),
         )
     )
 
@@ -53,7 +87,7 @@ object KeyboardLayouts {
             charRow("1234567890"),
             charRow("@#\$_&-+()/"),
             listOf(toSymbols2) + charRow("*\"':;!?") + listOf(delete),
-            listOf(toLetters, charKey(','), lang, space, charKey('.'), enter),
+            listOf(toLetters, comma, lang, space, period, enter),
         )
     )
 

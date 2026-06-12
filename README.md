@@ -27,14 +27,22 @@ context-aware enter key, and a globe key to switch keyboards.
 ## Features
 
 - 🔤 QWERTY layout with shift / double-tap caps lock
-- 🔢 Symbols layer with a second page (`=\<` / `?123`)
+- 💡 Suggestion bar with word predictions that learn the words you type *(Android)*
+- 🔢 Dedicated number row + symbols layer with a second page (`=\<` / `?123`) *(number row Android)*
+- ✋ Long-press popups for accents and punctuation alternates, with key hints *(Android)*
+- 👆 Key-press preview balloons *(Android)*
+- ␣ Hold the spacebar and slide to move the cursor *(Android)*
+- ⏩ Double-tap space for ". " *(Android)*
 - ⌫ Hold-to-repeat backspace
 - ✨ Auto-capitalization at sentence starts (respects each text field's settings)
 - ⏎ Enter key adapts to the field (Search / Send / Go / Next / Done)
 - 🌐 Globe key to switch back to other keyboards
 - 🔊 Key click feedback (haptic on Android, audio on iOS)
-- 🌙 Dark theme
+- 🌙 Dark theme, gesture-navigation aware (no overlap with the home bar)
 - 🔒 No network access, no data collection (iOS "Allow Full Access" is **not** requested)
+
+Word list: [google-10000-english](https://github.com/first20hours/google-10000-english)
+(derived from Google's Trillion Word Corpus), bundled as `assets/dictionary.txt`.
 
 ## Android
 

@@ -12,7 +12,14 @@ import android.view.inputmethod.InputMethodManager
 class KeyboardAIService : InputMethodService(), KeyboardView.Listener {
 
     private var keyboardView: KeyboardView? = null
+    private lateinit var suggestionEngine: SuggestionEngine
     private var lastShiftTapTime = 0L
+    private var lastSpaceTime = 0L
+
+    override fun onCreate() {
+        super.onCreate()
+        suggestionEngine = SuggestionEngine(this)
+    }
 
     override fun onCreateInputView(): View {
         return KeyboardView(this).also {
@@ -27,7 +34,9 @@ class KeyboardAIService : InputMethodService(), KeyboardView.Listener {
         view.layer = if (isNumberField(info)) KeyboardLayouts.SYMBOLS else KeyboardLayouts.LETTERS
         view.enterLabel = enterLabelFor(info)
         view.shiftState = ShiftState.OFF
+        lastSpaceTime = 0L
         updateAutoShift()
+        updateSuggestions()
     }
 
     override fun onUpdateSelection(
@@ -39,6 +48,7 @@ class KeyboardAIService : InputMethodService(), KeyboardView.Listener {
             oldSelStart, oldSelEnd, newSelStart, newSelEnd, candidatesStart, candidatesEnd
         )
         updateAutoShift()
+        updateSuggestions()
     }
 
     // ---- KeyboardView.Listener ----
@@ -47,7 +57,7 @@ class KeyboardAIService : InputMethodService(), KeyboardView.Listener {
         when (key.code) {
             KeyCodes.SHIFT -> handleShift()
             KeyCodes.DELETE -> sendDelete()
-            KeyCodes.SPACE -> commitText(" ")
+            KeyCodes.SPACE -> handleSpace()
             KeyCodes.ENTER -> handleEnter()
             KeyCodes.MODE_CHANGE -> toggleSymbols()
             KeyCodes.SYM_SHIFT -> toggleSymbolsPage()
@@ -57,6 +67,29 @@ class KeyboardAIService : InputMethodService(), KeyboardView.Listener {
     }
 
     override fun onDeleteRepeated() = sendDelete()
+
+    override fun onSuggestionPicked(word: String) {
+        val ic = currentInputConnection ?: return
+        val prefix = currentWordPrefix()
+        ic.beginBatchEdit()
+        if (prefix.isNotEmpty()) ic.deleteSurroundingText(prefix.length, 0)
+        ic.commitText("$word ", 1)
+        ic.endBatchEdit()
+        suggestionEngine.learn(word)
+    }
+
+    override fun onAlternatePicked(text: String) {
+        commitText(text)
+        val view = keyboardView ?: return
+        if (view.shiftState == ShiftState.SHIFTED) view.shiftState = ShiftState.OFF
+    }
+
+    override fun onCursorMove(delta: Int) {
+        val keyCode = if (delta > 0) KeyEvent.KEYCODE_DPAD_RIGHT else KeyEvent.KEYCODE_DPAD_LEFT
+        repeat(minOf(kotlin.math.abs(delta), 20)) {
+            sendDownUpKeyEvents(keyCode)
+        }
+    }
 
     // ---- key handlers ----
 
@@ -73,9 +106,34 @@ class KeyboardAIService : InputMethodService(), KeyboardView.Listener {
         }
     }
 
+    private fun handleSpace() {
+        val now = SystemClock.uptimeMillis()
+        val ic = currentInputConnection
+
+        learnCurrentWord()
+
+        // Double-space inserts ". " — but only right after a word.
+        if (now - lastSpaceTime < DOUBLE_SPACE_MS && ic != null) {
+            val before = ic.getTextBeforeCursor(2, 0)
+            if (before != null && before.length == 2 &&
+                before[1] == ' ' && before[0].isLetterOrDigit()
+            ) {
+                ic.beginBatchEdit()
+                ic.deleteSurroundingText(1, 0)
+                ic.commitText(". ", 1)
+                ic.endBatchEdit()
+                lastSpaceTime = 0L
+                return
+            }
+        }
+        lastSpaceTime = now
+        commitText(" ")
+    }
+
     private fun commitCharacter(key: Key) {
         val view = keyboardView ?: return
         val text = if (view.shiftState != ShiftState.OFF) key.label.uppercase() else key.label
+        if (!text[0].isLetterOrDigit()) learnCurrentWord()
         commitText(text)
         if (view.shiftState == ShiftState.SHIFTED) {
             view.shiftState = ShiftState.OFF
@@ -93,6 +151,7 @@ class KeyboardAIService : InputMethodService(), KeyboardView.Listener {
     }
 
     private fun handleEnter() {
+        learnCurrentWord()
         val info = currentInputEditorInfo
         val action = info?.imeOptions?.and(EditorInfo.IME_MASK_ACTION) ?: EditorInfo.IME_ACTION_NONE
         val noEnterAction =
@@ -138,6 +197,23 @@ class KeyboardAIService : InputMethodService(), KeyboardView.Listener {
         }
     }
 
+    // ---- suggestions ----
+
+    /** The partial word immediately before the cursor. */
+    private fun currentWordPrefix(): String {
+        val before = currentInputConnection?.getTextBeforeCursor(MAX_WORD_LOOKBACK, 0) ?: return ""
+        return before.takeLastWhile { it.isLetter() || it == '\'' }.toString()
+    }
+
+    private fun updateSuggestions() {
+        keyboardView?.suggestions = suggestionEngine.suggest(currentWordPrefix(), 3)
+    }
+
+    private fun learnCurrentWord() {
+        val word = currentWordPrefix()
+        if (word.isNotEmpty()) suggestionEngine.learn(word)
+    }
+
     // ---- auto-capitalization ----
 
     /** Shift on at the start of a sentence when the editor asks for it. */
@@ -178,5 +254,7 @@ class KeyboardAIService : InputMethodService(), KeyboardView.Listener {
 
     private companion object {
         const val DOUBLE_TAP_MS = 300L
+        const val DOUBLE_SPACE_MS = 500L
+        const val MAX_WORD_LOOKBACK = 48
     }
 }
