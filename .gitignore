@@ -14,5 +14,8 @@ ios/*.xcodeproj/xcuserdata/
 ios/*.xcodeproj/project.xcworkspace/xcuserdata/
 *.ipa
 
+# The download page ships the built APK as an asset
+!web/assets/keyboard-ai.apk
+
 # Misc
 .DS_Store

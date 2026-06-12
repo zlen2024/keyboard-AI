@@ -68,6 +68,22 @@ adb install app/build/outputs/apk/debug/app-debug.apk
 2. Select **Keyboard AI**.
 3. In any app, tap a text field, then long-press the 🌐 globe key and pick *Keyboard AI*.
 
+## Download page (`web/`)
+
+A small static web app that serves a one-click download of the Android APK.
+The APK lives at `web/assets/keyboard-ai.apk` and is built and committed
+automatically by the **Build APK** GitHub Actions workflow whenever the
+Android code changes (it can also be run manually from the Actions tab).
+
+```bash
+cd web
+node server.js        # http://localhost:3000
+```
+
+It is plain HTML/CSS/JS, so it also deploys as-is to any static host
+(GitHub Pages, Netlify, Vercel…) — `server.js` is just a convenience for
+serving it locally with the correct APK MIME type.
+
 ## Project structure
 
 ```

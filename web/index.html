@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Keyboard AI — Download</title>
+  <link rel="stylesheet" href="styles.css" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⌨️</text></svg>" />
+</head>
+<body>
+  <main class="card">
+    <div class="logo" aria-hidden="true">
+      <svg viewBox="0 0 108 108" width="72" height="72">
+        <rect x="0" y="0" width="108" height="108" rx="24" fill="#1B1D21" />
+        <rect x="22" y="38" width="64" height="32" rx="6" fill="#FFFFFF" />
+        <g fill="#4A8CF7">
+          <rect x="30" y="44" width="6" height="6" /><rect x="40" y="44" width="6" height="6" />
+          <rect x="50" y="44" width="6" height="6" /><rect x="60" y="44" width="6" height="6" />
+          <rect x="70" y="44" width="6" height="6" /><rect x="34" y="54" width="6" height="6" />
+          <rect x="44" y="54" width="6" height="6" /><rect x="54" y="54" width="6" height="6" />
+          <rect x="64" y="54" width="6" height="6" /><rect x="40" y="62" width="28" height="4" />
+        </g>
+      </svg>
+    </div>
+
+    <h1>Keyboard AI</h1>
+    <p class="tagline">A fast, clean keyboard for Android. Works in every app.</p>
+
+    <a id="download-btn" class="download" href="assets/keyboard-ai.apk" download="keyboard-ai.apk">
+      <span class="download-icon">⬇</span>
+      <span>
+        <strong>Download for Android</strong>
+        <small id="apk-meta">.apk file</small>
+      </span>
+    </a>
+    <p id="apk-missing" class="missing" hidden>
+      The APK hasn’t been published yet — check back soon.
+    </p>
+
+    <section class="steps">
+      <h2>How to install</h2>
+      <ol>
+        <li>Tap the download button above and open the <code>.apk</code> file.</li>
+        <li>If prompted, allow your browser to <em>install unknown apps</em>.</li>
+        <li>Open <strong>Keyboard AI</strong> and follow the two setup steps.</li>
+        <li>Type anywhere — long-press 🌐 to switch keyboards anytime.</li>
+      </ol>
+    </section>
+
+    <footer>
+      <p>iPhone user? The iOS keyboard ships through the App Store / TestFlight — APK files are Android-only.</p>
+    </footer>
+  </main>
+
+  <script>
+    // Grey out the button if the APK asset isn't there (e.g. fresh clone
+    // before the build workflow has published it).
+    fetch('assets/keyboard-ai.apk', { method: 'HEAD' })
+      .then((res) => {
+        if (!res.ok) throw new Error('missing');
+        const bytes = Number(res.headers.get('Content-Length'));
+        if (bytes > 0) {
+          const mb = (bytes / (1024 * 1024)).toFixed(1);
+          document.getElementById('apk-meta').textContent = `.apk · ${mb} MB`;
+        }
+      })
+      .catch(() => {
+        const btn = document.getElementById('download-btn');
+        btn.classList.add('disabled');
+        btn.removeAttribute('href');
+        document.getElementById('apk-missing').hidden = false;
+      });
+  </script>
+</body>
+</html>
