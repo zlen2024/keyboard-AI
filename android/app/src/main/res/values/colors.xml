@@ -1,0 +1,12 @@
+<resources>
+    <color name="kb_background">#1B1D21</color>
+    <color name="kb_key">#3A3D44</color>
+    <color name="kb_key_special">#2A2D33</color>
+    <color name="kb_key_accent">#4A8CF7</color>
+    <color name="kb_key_pressed">#5A5E66</color>
+    <color name="kb_text">#FFFFFF</color>
+    <color name="kb_text_dim">#B9BDC6</color>
+
+    <color name="brand_primary">#4A8CF7</color>
+    <color name="brand_surface">#15171A</color>
+</resources>
