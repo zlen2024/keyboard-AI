@@ -1,4 +1,4 @@
-name: Build APK and publish to web assets
+name: Build APK and deploy download page
 
 on:
   workflow_dispatch:
@@ -8,17 +8,20 @@ on:
       - main
     paths:
       - "android/**"
-      - ".github/workflows/build-apk.yml"
+      - "web/**"
+      - ".github/workflows/build-and-deploy.yml"
 
 permissions:
   contents: write
+  pages: write
+  id-token: write
 
 concurrency:
-  group: build-apk-${{ github.ref }}
+  group: build-deploy-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  build:
+  build-apk:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -53,3 +56,31 @@ jobs:
         with:
           name: keyboard-ai-apk
           path: web/assets/keyboard-ai.apk
+
+  deploy-pages:
+    needs: build-apk
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Place freshly built APK into the site
+        uses: actions/download-artifact@v4
+        with:
+          name: keyboard-ai-apk
+          path: web/assets
+
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5
+        with:
+          enablement: true
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: web
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

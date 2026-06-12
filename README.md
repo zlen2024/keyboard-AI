@@ -71,18 +71,26 @@ adb install app/build/outputs/apk/debug/app-debug.apk
 ## Download page (`web/`)
 
 A small static web app that serves a one-click download of the Android APK.
-The APK lives at `web/assets/keyboard-ai.apk` and is built and committed
-automatically by the **Build APK** GitHub Actions workflow whenever the
-Android code changes (it can also be run manually from the Actions tab).
+The APK lives at `web/assets/keyboard-ai.apk`.
+
+The **Build APK and deploy download page** GitHub Actions workflow runs
+whenever the Android or web code changes (or manually from the Actions tab) and:
+
+1. builds the debug APK and commits it to `web/assets/keyboard-ai.apk`, then
+2. deploys `web/` (with the fresh APK) to **GitHub Pages**.
+
+Note: on free GitHub plans, Pages only serves **public** repositories.
+
+To run it locally instead:
 
 ```bash
 cd web
 node server.js        # http://localhost:3000
 ```
 
-It is plain HTML/CSS/JS, so it also deploys as-is to any static host
-(GitHub Pages, Netlify, Vercel…) — `server.js` is just a convenience for
-serving it locally with the correct APK MIME type.
+It is plain HTML/CSS/JS, so it also deploys as-is to any other static host
+(Netlify, Vercel…) — `server.js` is just a convenience for serving it
+locally with the correct APK MIME type.
 
 ## Project structure
 
