@@ -21,6 +21,13 @@ android {
         ndk { abiFilters += "arm64-v8a" }
     }
 
+    // GGUF weights are bundled under assets/models/. Keep them uncompressed so the
+    // APK isn't bloated by zip-deflating already-quantized data and so extraction
+    // to private storage is a fast straight copy.
+    androidResources {
+        noCompress += "gguf"
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = true

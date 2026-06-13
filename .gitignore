@@ -17,5 +17,8 @@ ios/*.xcodeproj/project.xcworkspace/xcuserdata/
 # The download page ships the built APK as an asset
 !web/assets/keyboard-ai.apk
 
+# Bundled model weights are fetched at build time, never committed (too large).
+android/app/src/main/assets/models/**/*.gguf
+
 # Misc
 .DS_Store

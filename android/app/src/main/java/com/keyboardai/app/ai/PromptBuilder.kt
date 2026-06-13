@@ -17,12 +17,37 @@ object PromptBuilder {
             "unless asked. Match the user's language and the requested tone. When a " +
             "screenshot is provided, ground your answer in what it shows."
 
+    private const val FORM_FILL_PERSONA =
+        "You are Keyboard AI's form autofill. You help the user complete a form " +
+            "field using the facts they have saved about themselves. You are given " +
+            "the field's question/label (and sometimes a screenshot of the form). " +
+            "Reply with ONLY the exact value to type into that one field — no label, " +
+            "no quotes, no explanation, no trailing punctuation. If the answer is a " +
+            "known fact about the user (name, email, phone, address, etc.), output it " +
+            "verbatim. If it is an open question (e.g. feedback, a reason, a comment), " +
+            "write a short, plausible answer in the user's voice and tone. If you " +
+            "genuinely cannot tell what to put, reply with exactly: (unknown)"
+
+    /** General writing assistant prompt (the ✨ prompt bar). */
     fun systemPrompt(profile: UserProfile, memory: MemoryStore): String = buildString {
         append(PERSONA)
+        appendUserContext(profile, memory)
+    }
 
+    /** Specialized prompt for one-tap form autofill (the 📝 action). */
+    fun formFillPrompt(profile: UserProfile, memory: MemoryStore): String = buildString {
+        append(FORM_FILL_PERSONA)
+        appendUserContext(profile, memory)
+    }
+
+    private fun StringBuilder.appendUserContext(profile: UserProfile, memory: MemoryStore) {
         if (!profile.isEmpty) {
             append("\n\nAbout the user:")
             if (profile.name.isNotBlank()) append("\n- Name: ${profile.name}")
+            if (profile.email.isNotBlank()) append("\n- Email: ${profile.email}")
+            if (profile.phone.isNotBlank()) append("\n- Phone: ${profile.phone}")
+            if (profile.address.isNotBlank()) append("\n- Address: ${profile.address}")
+            if (profile.organization.isNotBlank()) append("\n- Organization: ${profile.organization}")
             if (profile.occupation.isNotBlank()) append("\n- Occupation: ${profile.occupation}")
             if (profile.tone.isNotBlank()) append("\n- Preferred tone: ${profile.tone}")
             if (profile.languages.isNotBlank()) append("\n- Languages: ${profile.languages}")
