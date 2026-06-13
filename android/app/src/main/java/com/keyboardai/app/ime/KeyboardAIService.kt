@@ -6,30 +6,83 @@ import android.os.SystemClock
 import android.text.InputType
 import android.view.KeyEvent
 import android.view.View
+import android.view.ViewGroup
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
+import android.widget.LinearLayout
+import com.keyboardai.app.ai.ChatTurn
+import com.keyboardai.app.ai.ModelManager
+import com.keyboardai.app.ai.PromptBuilder
+import com.keyboardai.app.ai.memory.MemoryStore
+import com.keyboardai.app.ai.memory.ProfileStore
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 
-class KeyboardAIService : InputMethodService(), KeyboardView.Listener {
+class KeyboardAIService : InputMethodService(), KeyboardView.Listener, AiBarView.Listener {
 
     private var keyboardView: KeyboardView? = null
+    private var aiBar: AiBarView? = null
     private lateinit var suggestionEngine: SuggestionEngine
+    private lateinit var profileStore: ProfileStore
+    private lateinit var memory: MemoryStore
+
     private var lastShiftTapTime = 0L
     private var lastSpaceTime = 0L
+
+    // AI assistant state
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+    private val promptBuffer = StringBuilder()
+    private var aiMode = false
+    private var generating = false
+    private var generateJob: Job? = null
+    private var attachedImagePath: String? = null
 
     override fun onCreate() {
         super.onCreate()
         suggestionEngine = SuggestionEngine(this)
+        profileStore = ProfileStore(this)
+        memory = MemoryStore(this)
     }
 
     override fun onCreateInputView(): View {
-        return KeyboardView(this).also {
+        val kb = KeyboardView(this).also {
             it.listener = this
             keyboardView = it
+        }
+        val bar = AiBarView(this).also {
+            it.listener = this
+            aiBar = it
+        }
+        observeModelState()
+        return LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            addView(bar, LinearLayout.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+            addView(kb, LinearLayout.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+        }
+    }
+
+    private fun observeModelState() {
+        scope.launch {
+            ModelManager.state.collect { st ->
+                if (!generating) return@collect
+                when (st) {
+                    is ModelManager.State.Downloading ->
+                        aiBar?.setStatus("Downloading model ${(st.fraction * 100).toInt()}%")
+                    ModelManager.State.Loading -> aiBar?.setStatus("Loading model…")
+                    is ModelManager.State.Error -> aiBar?.setStatus("Error: ${st.message}")
+                    else -> {}
+                }
+            }
         }
     }
 
     override fun onStartInputView(info: EditorInfo, restarting: Boolean) {
         super.onStartInputView(info, restarting)
+        exitAiMode()
         val view = keyboardView ?: return
         view.layer = if (isNumberField(info)) KeyboardLayouts.SYMBOLS else KeyboardLayouts.LETTERS
         view.enterLabel = enterLabelFor(info)
@@ -37,6 +90,18 @@ class KeyboardAIService : InputMethodService(), KeyboardView.Listener {
         lastSpaceTime = 0L
         updateAutoShift()
         updateSuggestions()
+    }
+
+    override fun onFinishInput() {
+        super.onFinishInput()
+        // A fully dismissed keyboard ends the conversation session.
+        memory.clearSession()
+        exitAiMode()
+    }
+
+    override fun onDestroy() {
+        scope.coroutineContext[Job]?.cancel()
+        super.onDestroy()
     }
 
     override fun onUpdateSelection(
@@ -47,8 +112,75 @@ class KeyboardAIService : InputMethodService(), KeyboardView.Listener {
         super.onUpdateSelection(
             oldSelStart, oldSelEnd, newSelStart, newSelEnd, candidatesStart, candidatesEnd
         )
+        if (aiMode) return
         updateAutoShift()
         updateSuggestions()
+    }
+
+    // ---- AiBarView.Listener ----
+
+    override fun onToggleAiMode() {
+        aiMode = true
+        promptBuffer.clear()
+        attachedImagePath = null
+        aiBar?.setAiMode(true)
+        keyboardView?.suggestions = emptyList()
+    }
+
+    override fun onCancel() {
+        generateJob?.cancel()
+        exitAiMode()
+    }
+
+    override fun onGenerate() {
+        if (generating) {
+            generateJob?.cancel()
+            return
+        }
+        triggerGenerate()
+    }
+
+    private fun exitAiMode() {
+        aiMode = false
+        generating = false
+        promptBuffer.clear()
+        attachedImagePath = null
+        aiBar?.setGenerating(false)
+        aiBar?.setAiMode(false)
+    }
+
+    private fun triggerGenerate() {
+        val prompt = promptBuffer.toString().trim()
+        if (prompt.isEmpty()) return
+        val imagePath = attachedImagePath
+
+        generateJob?.cancel()
+        generateJob = scope.launch {
+            generating = true
+            aiBar?.setGenerating(true)
+            val ic = currentInputConnection
+            try {
+                ModelManager.prepare(applicationContext)
+                val system = PromptBuilder.systemPrompt(profileStore.load(), memory)
+                val history = memory.sessionTurns()
+                val answer = StringBuilder()
+                ModelManager.engine()
+                    .generate(system, history, prompt, imagePath)
+                    .collect { chunk ->
+                        answer.append(chunk)
+                        ic?.commitText(chunk, 1)
+                    }
+                memory.recordTurn(ChatTurn(fromUser = true, text = prompt))
+                memory.recordTurn(ChatTurn(fromUser = false, text = answer.toString()))
+                exitAiMode()
+            } catch (c: CancellationException) {
+                throw c
+            } catch (t: Throwable) {
+                aiBar?.setStatus("AI error: ${t.message ?: "failed"}")
+                generating = false
+                aiBar?.setGenerating(false)
+            }
+        }
     }
 
     // ---- KeyboardView.Listener ----
@@ -107,6 +239,10 @@ class KeyboardAIService : InputMethodService(), KeyboardView.Listener {
     }
 
     private fun handleSpace() {
+        if (isComposingPrompt()) {
+            commitText(" ")
+            return
+        }
         val now = SystemClock.uptimeMillis()
         val ic = currentInputConnection
 
@@ -133,24 +269,43 @@ class KeyboardAIService : InputMethodService(), KeyboardView.Listener {
     private fun commitCharacter(key: Key) {
         val view = keyboardView ?: return
         val text = if (view.shiftState != ShiftState.OFF) key.label.uppercase() else key.label
-        if (!text[0].isLetterOrDigit()) learnCurrentWord()
+        if (!isComposingPrompt() && !text[0].isLetterOrDigit()) learnCurrentWord()
         commitText(text)
         if (view.shiftState == ShiftState.SHIFTED) {
             view.shiftState = ShiftState.OFF
         }
     }
 
+    /** True while the user is typing into the AI prompt rather than the app. */
+    private fun isComposingPrompt(): Boolean = aiMode && !generating
+
     private fun commitText(text: String) {
-        currentInputConnection?.commitText(text, 1)
+        if (isComposingPrompt()) {
+            promptBuffer.append(text)
+            aiBar?.setPrompt(promptBuffer.toString())
+        } else {
+            currentInputConnection?.commitText(text, 1)
+        }
     }
 
     private fun sendDelete() {
+        if (isComposingPrompt()) {
+            if (promptBuffer.isNotEmpty()) {
+                promptBuffer.deleteCharAt(promptBuffer.length - 1)
+                aiBar?.setPrompt(promptBuffer.toString())
+            }
+            return
+        }
         // KEYCODE_DEL handles selections and lets editors run their own
         // backspace behavior; plain deleteSurroundingText would not.
         sendDownUpKeyEvents(KeyEvent.KEYCODE_DEL)
     }
 
     private fun handleEnter() {
+        if (isComposingPrompt()) {
+            triggerGenerate()
+            return
+        }
         learnCurrentWord()
         val info = currentInputEditorInfo
         val action = info?.imeOptions?.and(EditorInfo.IME_MASK_ACTION) ?: EditorInfo.IME_ACTION_NONE
@@ -206,6 +361,10 @@ class KeyboardAIService : InputMethodService(), KeyboardView.Listener {
     }
 
     private fun updateSuggestions() {
+        if (aiMode) {
+            keyboardView?.suggestions = emptyList()
+            return
+        }
         keyboardView?.suggestions = suggestionEngine.suggest(currentWordPrefix(), 3)
     }
 

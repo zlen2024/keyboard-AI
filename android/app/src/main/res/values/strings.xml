@@ -16,4 +16,7 @@
     <string name="status_not_enabled">Keyboard AI is not enabled yet</string>
     <string name="status_enabled">Keyboard AI is enabled — now switch to it</string>
     <string name="status_active">Keyboard AI is your active keyboard ✅</string>
+
+    <string name="ai_hint">✨ Tap to ask Keyboard AI</string>
+    <string name="ai_prompt_hint">Type your prompt, then ➤</string>
 </resources>
