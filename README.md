@@ -24,6 +24,28 @@ Both implementations share the same design: QWERTY letters, two symbol pages,
 shift with double-tap caps lock, hold-to-repeat delete, auto-capitalization,
 context-aware enter key, and a globe key to switch keyboards.
 
+## AI assistant (Android)
+
+Keyboard AI can generate text for you on-device. Tap **✨** on the bar above the
+keys to enter AI mode, type a prompt, and hit **➤** — the reply streams straight
+into whatever app you're in. Tap **📷** to attach a screenshot and ask about
+what's on screen. Set up your profile and pick a model under **Set up AI
+assistant** in the app.
+
+- On-device LLM/VLM via the [Liquid LEAP SDK](https://leap.liquid.ai) (llama.cpp
+  backed). Default model **LFM2.5-VL-450M** (newest-gen, ~330 MB, vision+text);
+  optional **LFM2.5-VL-1.6B** for higher quality.
+- Model weights download once from Hugging Face on first use, then run fully
+  offline. This adds the `INTERNET` permission (the only network use).
+- A **profile** ("harness") and **session / daily / global memory** let it act
+  as a personal assistant that remembers context across uses.
+- Screenshots use Android's MediaProjection (a one-time per-session consent
+  prompt). Scrolling screenshots are not yet supported.
+- **Requires Android 12+ (API 31)** and an arm64 device — required by the model
+  runtime. Normal typing still works on the keyboard regardless.
+- iOS keyboards can't host a model this size (OS memory limit), so AI features
+  are Android-only; the iOS keyboard remains a standard typing keyboard.
+
 ## Features
 
 - 🔤 QWERTY layout with shift / double-tap caps lock

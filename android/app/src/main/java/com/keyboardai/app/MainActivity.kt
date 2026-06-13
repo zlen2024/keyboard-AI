@@ -26,6 +26,10 @@ class MainActivity : AppCompatActivity() {
         requireNotNull(findViewById<Button>(R.id.switch_button)).setOnClickListener {
             imm().showInputMethodPicker()
         }
+
+        requireNotNull(findViewById<Button>(R.id.ai_setup_button)).setOnClickListener {
+            startActivity(Intent(this, com.keyboardai.app.ui.AiSetupActivity::class.java))
+        }
     }
 
     override fun onResume() {

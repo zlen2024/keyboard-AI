@@ -36,6 +36,11 @@
                 android:resource="@xml/method" />
         </service>
 
+        <activity
+            android:name=".ui.AiSetupActivity"
+            android:exported="false"
+            android:label="@string/ai_setup_title" />
+
         <!-- Brokers the MediaProjection consent dialog on behalf of the keyboard. -->
         <activity
             android:name=".ai.vision.CaptureActivity"

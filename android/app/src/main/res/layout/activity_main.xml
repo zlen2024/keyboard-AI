@@ -98,6 +98,13 @@
             android:textColor="@color/kb_text"
             android:textColorHint="@color/kb_text_dim" />
 
+        <Button
+            android:id="@+id/ai_setup_button"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="28dp"
+            android:text="@string/ai_setup_open" />
+
     </LinearLayout>
 
 </ScrollView>
