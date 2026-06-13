@@ -15,6 +15,7 @@ import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
 import android.widget.LinearLayout
 import androidx.core.content.ContextCompat
+import com.keyboardai.app.R
 import com.keyboardai.app.ai.ChatTurn
 import com.keyboardai.app.ai.ModelManager
 import com.keyboardai.app.ai.PromptBuilder
