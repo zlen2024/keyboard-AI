@@ -11,7 +11,8 @@ android {
 
     defaultConfig {
         applicationId = "com.keyboardai.app"
-        minSdk = 24
+        // LEAP SDK requires API 31+; the on-device model needs a modern phone anyway.
+        minSdk = 31
         targetSdk = 36
         versionCode = 3
         versionName = "2.0.0"

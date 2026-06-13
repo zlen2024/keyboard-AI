@@ -23,16 +23,19 @@ class AiBarView(context: Context) : LinearLayout(context) {
         fun onToggleAiMode()
         fun onGenerate()
         fun onCancel()
+        fun onScreenshot()
     }
 
     var listener: Listener? = null
 
     private val promptText: TextView
     private val leadingButton: TextView
+    private val screenshotButton: TextView
     private val actionButton: TextView
 
     private var aiMode = false
     private var generating = false
+    private var hasImage = false
 
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
 
@@ -60,12 +63,16 @@ class AiBarView(context: Context) : LinearLayout(context) {
             layoutParams = lp
             setOnClickListener { if (!aiMode) listener?.onToggleAiMode() }
         }
+        screenshotButton = pillButton("📷").apply {
+            setOnClickListener { listener?.onScreenshot() }
+        }
         actionButton = pillButton("➤").apply {
             setOnClickListener { listener?.onGenerate() }
         }
 
         addView(leadingButton)
         addView(promptText)
+        addView(screenshotButton)
         addView(actionButton)
         render()
     }
@@ -86,7 +93,15 @@ class AiBarView(context: Context) : LinearLayout(context) {
 
     fun setAiMode(active: Boolean) {
         aiMode = active
-        if (!active) generating = false
+        if (!active) {
+            generating = false
+            hasImage = false
+        }
+        render()
+    }
+
+    fun setHasImage(value: Boolean) {
+        hasImage = value
         render()
     }
 
@@ -112,6 +127,8 @@ class AiBarView(context: Context) : LinearLayout(context) {
     private fun render() {
         leadingButton.text = if (aiMode) "✕" else "✨"
         actionButton.visibility = if (aiMode) View.VISIBLE else View.GONE
+        screenshotButton.visibility = if (aiMode && !generating) View.VISIBLE else View.GONE
+        screenshotButton.text = if (hasImage) "🖼️" else "📷"
         actionButton.text = if (generating) "■" else "➤"
         actionButton.setTextColor(
             ContextCompat.getColor(

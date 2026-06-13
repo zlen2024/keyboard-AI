@@ -1,5 +1,9 @@
 package com.keyboardai.app.ime
 
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.inputmethodservice.InputMethodService
 import android.os.Build
 import android.os.SystemClock
@@ -10,11 +14,14 @@ import android.view.ViewGroup
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
 import android.widget.LinearLayout
+import androidx.core.content.ContextCompat
 import com.keyboardai.app.ai.ChatTurn
 import com.keyboardai.app.ai.ModelManager
 import com.keyboardai.app.ai.PromptBuilder
 import com.keyboardai.app.ai.memory.MemoryStore
 import com.keyboardai.app.ai.memory.ProfileStore
+import com.keyboardai.app.ai.vision.CaptureActivity
+import com.keyboardai.app.ai.vision.ScreenCapture
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -41,11 +48,27 @@ class KeyboardAIService : InputMethodService(), KeyboardView.Listener, AiBarView
     private var generateJob: Job? = null
     private var attachedImagePath: String? = null
 
+    private val captureReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            val file = ScreenCapture.captureFile(this@KeyboardAIService)
+            if (file.exists() && file.length() > 0) {
+                attachedImagePath = file.absolutePath
+                aiBar?.setHasImage(true)
+            }
+        }
+    }
+
     override fun onCreate() {
         super.onCreate()
         suggestionEngine = SuggestionEngine(this)
         profileStore = ProfileStore(this)
         memory = MemoryStore(this)
+        ContextCompat.registerReceiver(
+            this,
+            captureReceiver,
+            IntentFilter(ScreenCapture.ACTION_CAPTURE_READY),
+            ContextCompat.RECEIVER_NOT_EXPORTED,
+        )
     }
 
     override fun onCreateInputView(): View {
@@ -100,6 +123,7 @@ class KeyboardAIService : InputMethodService(), KeyboardView.Listener, AiBarView
     }
 
     override fun onDestroy() {
+        runCatching { unregisterReceiver(captureReceiver) }
         scope.coroutineContext[Job]?.cancel()
         super.onDestroy()
     }
@@ -130,6 +154,13 @@ class KeyboardAIService : InputMethodService(), KeyboardView.Listener, AiBarView
     override fun onCancel() {
         generateJob?.cancel()
         exitAiMode()
+    }
+
+    override fun onScreenshot() {
+        if (!aiMode) onToggleAiMode()
+        val intent = Intent(this, CaptureActivity::class.java)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        startActivity(intent)
     }
 
     override fun onGenerate() {

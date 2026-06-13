@@ -36,6 +36,19 @@
                 android:resource="@xml/method" />
         </service>
 
+        <!-- Brokers the MediaProjection consent dialog on behalf of the keyboard. -->
+        <activity
+            android:name=".ai.vision.CaptureActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:launchMode="singleTop"
+            android:theme="@style/Theme.Transparent" />
+
+        <service
+            android:name=".ai.vision.ScreenCaptureService"
+            android:exported="false"
+            android:foregroundServiceType="mediaProjection" />
+
     </application>
 
 </manifest>
