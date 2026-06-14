@@ -8,6 +8,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import org.json.JSONObject
 import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
@@ -148,11 +149,84 @@ object ModelManager {
             }
         }
 
+        // Ask the repo what it actually contains rather than trusting hard-coded
+        // file names (which drift when a model is requantized or renamed).
+        val (modelRemote, mmprojRemote) = resolveRemoteFiles(spec)
+
         modelDir(context, spec).mkdirs()
-        fetch(spec.modelUrl, modelFile(context, spec))
-        val mmprojUrl = spec.mmprojUrl
-        val mmproj = mmprojFile(context, spec)
-        if (mmprojUrl != null && mmproj != null) fetch(mmprojUrl, mmproj)
+        fetch(hfResolveUrl(spec.repo, modelRemote), modelFile(context, spec))
+        val mmprojDest = mmprojFile(context, spec)
+        if (spec.mmprojFile != null && mmprojRemote != null && mmprojDest != null) {
+            fetch(hfResolveUrl(spec.repo, mmprojRemote), mmprojDest)
+        }
+    }
+
+    private fun hfResolveUrl(repo: String, rfilename: String) =
+        "https://huggingface.co/$repo/resolve/main/$rfilename?download=true"
+
+    /**
+     * Resolves the real `(model, mmproj)` file names in [spec]'s repo via the
+     * Hugging Face API, picking the preferred quant. Falls back to the names
+     * declared on [spec] if the listing can't be fetched.
+     */
+    private fun resolveRemoteFiles(spec: ModelSpec): Pair<String, String?> {
+        val ggufs = listRepoFiles(spec.repo).filter { it.endsWith(".gguf", ignoreCase = true) }
+        if (ggufs.isEmpty()) return spec.modelFile to spec.mmprojFile
+
+        val (mmprojFiles, modelFiles) = ggufs.partition {
+            it.substringAfterLast('/').startsWith("mmproj", ignoreCase = true)
+        }
+        val model = MODEL_QUANT_PREFERENCE.firstNotNullOfOrNull { q ->
+            modelFiles.firstOrNull { it.contains(q, ignoreCase = true) }
+        } ?: modelFiles.firstOrNull() ?: spec.modelFile
+
+        val mmproj = if (spec.mmprojFile == null) {
+            null
+        } else {
+            MMPROJ_QUANT_PREFERENCE.firstNotNullOfOrNull { q ->
+                mmprojFiles.firstOrNull { it.contains(q, ignoreCase = true) }
+            } ?: mmprojFiles.firstOrNull() ?: spec.mmprojFile
+        }
+        return model to mmproj
+    }
+
+    /** The `rfilename` of every file in a public HF repo (empty on any failure). */
+    private fun listRepoFiles(repo: String): List<String> = runCatching {
+        val body = httpGetText("https://huggingface.co/api/models/$repo") ?: return emptyList()
+        val siblings = JSONObject(body).optJSONArray("siblings") ?: return emptyList()
+        buildList {
+            for (i in 0 until siblings.length()) {
+                siblings.optJSONObject(i)?.optString("rfilename")
+                    ?.takeIf { it.isNotBlank() }?.let { add(it) }
+            }
+        }
+    }.getOrDefault(emptyList())
+
+    private fun httpGetText(url: String): String? {
+        var current = url
+        var redirects = 0
+        while (true) {
+            val conn = (URL(current).openConnection() as HttpURLConnection).apply {
+                instanceFollowRedirects = false
+                connectTimeout = 30_000
+                readTimeout = 30_000
+                setRequestProperty("Accept", "application/json")
+            }
+            val code = conn.responseCode
+            if (code in 300..399) {
+                val location = conn.getHeaderField("Location")
+                conn.disconnect()
+                if (location == null || ++redirects > 5) return null
+                current = location
+                continue
+            }
+            if (code != HttpURLConnection.HTTP_OK) {
+                conn.disconnect()
+                return null
+            }
+            return conn.inputStream.bufferedReader().use { it.readText() }
+                .also { conn.disconnect() }
+        }
     }
 
     /** Streams [url] to [dest], following HF's cross-host redirects. Returns bytes written. */
@@ -215,4 +289,11 @@ object ModelManager {
         Runtime.getRuntime().availableProcessors().coerceIn(2, 6)
 
     private const val CONTEXT_SIZE = 4096
+
+    /** Quant preference for the main model: balance of size/quality for on-device. */
+    private val MODEL_QUANT_PREFERENCE =
+        listOf("Q4_K_M", "Q4_K_S", "Q4_0", "Q5_K_M", "Q5_0", "Q6_K", "Q8_0", "F16")
+
+    /** The vision projector is small; prefer higher precision. */
+    private val MMPROJ_QUANT_PREFERENCE = listOf("Q8_0", "F16", "f16", "Q6_K")
 }

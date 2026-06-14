@@ -57,7 +57,7 @@ dependencies {
     implementation("androidx.constraintlayout:constraintlayout:2.2.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
 
-    // On-device LLM/VLM runtime (LFM2.5 models). llama.cpp-backed, arm64 only.
+    // On-device LLM/VLM runtime (LFM2-VL models). llama.cpp-backed, arm64 only.
     implementation("ai.liquid.leap:leap-sdk:0.10.9")
 }
 
