@@ -21,8 +21,17 @@ data class ModelSpec(
     val mmprojFile: String?,
     /** Approximate on-disk download size, for the UI. */
     val approxBytes: Long,
+    /**
+     * True when the GGUF weights are shipped inside the APK under
+     * `assets/models/<id>/`. Such a model loads with zero network access;
+     * [ModelManager] extracts it from assets instead of downloading.
+     */
+    val bundled: Boolean = false,
 ) {
     val isMultimodal: Boolean get() = mmprojFile != null
+
+    /** Folder under `assets/` that holds the bundled GGUF files for this model. */
+    val assetDir: String get() = "models/$id"
 
     private fun url(file: String) = "https://huggingface.co/$repo/resolve/main/$file?download=true"
 
@@ -32,7 +41,13 @@ data class ModelSpec(
 
 object ModelCatalog {
 
-    /** Fast, light default — newest-generation 450M vision+text model. */
+    /**
+     * Fast, light default — newest-generation 450M vision+text model.
+     * Downloaded once from Hugging Face on first use, then runs fully offline.
+     * (If its GGUF files are ever dropped into `assets/models/lfm2.5-vl-450m/`
+     * the loader will use those instead and skip the download — see the README
+     * there — but the app does not ship them by default.)
+     */
     val LFM2_5_VL_450M = ModelSpec(
         id = "lfm2.5-vl-450m",
         displayName = "LFM2.5-VL 450M (fast)",

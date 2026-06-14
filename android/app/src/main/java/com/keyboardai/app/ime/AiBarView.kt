@@ -24,18 +24,24 @@ class AiBarView(context: Context) : LinearLayout(context) {
         fun onGenerate()
         fun onCancel()
         fun onScreenshot()
+        fun onAutofill()
     }
 
     var listener: Listener? = null
 
     private val promptText: TextView
     private val leadingButton: TextView
+    private val autofillButton: TextView
     private val screenshotButton: TextView
     private val actionButton: TextView
 
     private var aiMode = false
     private var generating = false
     private var hasImage = false
+    /** A blocking task (form autofill / model load) is running; buttons are locked. */
+    private var working = false
+    /** A pinned message (working status, result, or error) shown until the next interaction. */
+    private var statusMsg: String? = null
 
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
 
@@ -50,6 +56,9 @@ class AiBarView(context: Context) : LinearLayout(context) {
             setOnClickListener {
                 if (aiMode) listener?.onCancel() else listener?.onToggleAiMode()
             }
+        }
+        autofillButton = pillButton("📝").apply {
+            setOnClickListener { if (!working) listener?.onAutofill() }
         }
         promptText = TextView(context).apply {
             setTextColor(ContextCompat.getColor(context, R.color.kb_text_dim))
@@ -71,6 +80,7 @@ class AiBarView(context: Context) : LinearLayout(context) {
         }
 
         addView(leadingButton)
+        addView(autofillButton)
         addView(promptText)
         addView(screenshotButton)
         addView(actionButton)
@@ -93,6 +103,7 @@ class AiBarView(context: Context) : LinearLayout(context) {
 
     fun setAiMode(active: Boolean) {
         aiMode = active
+        statusMsg = null
         if (!active) {
             generating = false
             hasImage = false
@@ -113,21 +124,39 @@ class AiBarView(context: Context) : LinearLayout(context) {
 
     fun setGenerating(value: Boolean) {
         generating = value
+        if (value) statusMsg = null
         render()
     }
 
-    /** Shows a transient status (download %, errors). Pass null to clear. */
+    /** Shows a transient status (download %, errors) without changing the working state. */
     fun setStatus(status: String?) {
-        if (status != null) {
-            promptText.text = status
-            promptText.setTextColor(ContextCompat.getColor(context, R.color.kb_text_dim))
-        }
+        statusMsg = status
+        render()
+    }
+
+    /**
+     * Marks a blocking task (form autofill, model load) as running and pins its
+     * [message]. Buttons are locked until [finishWorking] is called.
+     */
+    fun setWorking(message: String) {
+        working = true
+        statusMsg = message
+        render()
+    }
+
+    /** Ends the working task, optionally leaving a final [result] message pinned. */
+    fun finishWorking(result: String?) {
+        working = false
+        statusMsg = result
+        render()
     }
 
     private fun render() {
         leadingButton.text = if (aiMode) "✕" else "✨"
-        actionButton.visibility = if (aiMode) View.VISIBLE else View.GONE
-        screenshotButton.visibility = if (aiMode && !generating) View.VISIBLE else View.GONE
+        // 📝 autofill is available whenever no task is running.
+        autofillButton.visibility = if (working || generating) View.GONE else View.VISIBLE
+        actionButton.visibility = if (aiMode && !working) View.VISIBLE else View.GONE
+        screenshotButton.visibility = if (aiMode && !generating && !working) View.VISIBLE else View.GONE
         screenshotButton.text = if (hasImage) "🖼️" else "📷"
         actionButton.text = if (generating) "■" else "➤"
         actionButton.setTextColor(
@@ -136,7 +165,12 @@ class AiBarView(context: Context) : LinearLayout(context) {
                 if (generating) R.color.kb_text else R.color.kb_key_accent,
             )
         )
-        if (!aiMode) {
+
+        val pinned = statusMsg
+        if (pinned != null) {
+            promptText.text = pinned
+            promptText.setTextColor(ContextCompat.getColor(context, R.color.kb_text_dim))
+        } else if (!aiMode) {
             promptText.text = context.getString(R.string.ai_hint)
         } else if (!generating) {
             promptText.text = context.getString(R.string.ai_prompt_hint)

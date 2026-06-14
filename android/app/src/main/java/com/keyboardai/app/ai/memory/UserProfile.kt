@@ -10,6 +10,11 @@ import java.io.File
  */
 data class UserProfile(
     val name: String = "",
+    /** Contact + identity fields used to autofill forms (Google Forms, sign-ups…). */
+    val email: String = "",
+    val phone: String = "",
+    val address: String = "",
+    val organization: String = "",
     val occupation: String = "",
     val tone: String = "",
     val languages: String = "",
@@ -17,11 +22,16 @@ data class UserProfile(
     val about: String = "",
 ) {
     val isEmpty: Boolean
-        get() = name.isBlank() && occupation.isBlank() && tone.isBlank() &&
-            languages.isBlank() && about.isBlank()
+        get() = name.isBlank() && email.isBlank() && phone.isBlank() &&
+            address.isBlank() && organization.isBlank() && occupation.isBlank() &&
+            tone.isBlank() && languages.isBlank() && about.isBlank()
 
     fun toJson(): JSONObject = JSONObject()
         .put("name", name)
+        .put("email", email)
+        .put("phone", phone)
+        .put("address", address)
+        .put("organization", organization)
         .put("occupation", occupation)
         .put("tone", tone)
         .put("languages", languages)
@@ -30,6 +40,10 @@ data class UserProfile(
     companion object {
         fun fromJson(json: JSONObject) = UserProfile(
             name = json.optString("name"),
+            email = json.optString("email"),
+            phone = json.optString("phone"),
+            address = json.optString("address"),
+            organization = json.optString("organization"),
             occupation = json.optString("occupation"),
             tone = json.optString("tone"),
             languages = json.optString("languages"),

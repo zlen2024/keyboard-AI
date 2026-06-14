@@ -17,25 +17,38 @@
     <string name="status_enabled">Keyboard AI is enabled — now switch to it</string>
     <string name="status_active">Keyboard AI is your active keyboard ✅</string>
 
-    <string name="ai_hint">✨ Tap to ask Keyboard AI</string>
+    <string name="ai_hint">✨ Ask · 📝 Autofill the field</string>
     <string name="ai_prompt_hint">Type your prompt, then ➤</string>
+
+    <!-- Form autofill (📝) -->
+    <string name="ai_autofill_reading">Reading the form…</string>
+    <string name="ai_autofill_working">Filling this field…</string>
+    <string name="ai_autofill_unknown">Couldn\'t tell what to fill — add it under Set up AI</string>
+    <string name="ai_autofill_no_capture">Couldn\'t read the screen — try again</string>
+    <string name="ai_autofill_error">Autofill error: %1$s</string>
 
     <string name="ai_setup_open">Set up AI assistant</string>
     <string name="ai_setup_title">AI assistant</string>
     <string name="ai_profile_header">About you</string>
-    <string name="ai_profile_caption">The assistant uses this to write as your personal assistant. All on-device.</string>
-    <string name="ai_field_name">Your name</string>
+    <string name="ai_profile_caption">Used to autofill forms and write as your personal assistant. Stored on-device only.</string>
+    <string name="ai_field_name">Full name</string>
+    <string name="ai_field_email">Email</string>
+    <string name="ai_field_phone">Phone</string>
+    <string name="ai_field_address">Address</string>
+    <string name="ai_field_organization">Organization / school (optional)</string>
     <string name="ai_field_occupation">Occupation (optional)</string>
     <string name="ai_field_tone">Preferred tone, e.g. friendly, formal</string>
     <string name="ai_field_languages">Languages you write in</string>
-    <string name="ai_field_about">Anything the AI should always know about you</string>
+    <string name="ai_field_about">Anything else the AI should know (date of birth, IDs, preferences…)</string>
     <string name="ai_save_profile">Save profile</string>
     <string name="ai_profile_saved">Profile saved</string>
     <string name="ai_model_header">AI model</string>
-    <string name="ai_model_caption">Downloaded once, then runs fully offline. Wi-Fi recommended.</string>
+    <string name="ai_model_caption">Downloaded once on first use, then runs fully offline. Wi-Fi recommended.</string>
     <string name="ai_download_model">Download / switch model</string>
     <string name="ai_downloading">Downloading model %1$d%%…</string>
+    <string name="ai_unpacking">Preparing model %1$d%%…</string>
     <string name="ai_loading">Loading model…</string>
     <string name="ai_ready">Model ready ✅</string>
+    <string name="ai_offline_ready">Ready to use offline ✅</string>
     <string name="ai_model_error">Error: %1$s</string>
 </resources>

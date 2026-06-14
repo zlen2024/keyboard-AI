@@ -35,6 +35,10 @@ class AiSetupActivity : AppCompatActivity() {
     private lateinit var profileStore: ProfileStore
 
     private lateinit var nameField: EditText
+    private lateinit var emailField: EditText
+    private lateinit var phoneField: EditText
+    private lateinit var addressField: EditText
+    private lateinit var organizationField: EditText
     private lateinit var occupationField: EditText
     private lateinit var toneField: EditText
     private lateinit var languagesField: EditText
@@ -57,12 +61,18 @@ class AiSetupActivity : AppCompatActivity() {
         root.addView(caption(getString(R.string.ai_profile_caption)))
         val profile = profileStore.load()
         nameField = field(getString(R.string.ai_field_name), profile.name)
+        emailField = field(getString(R.string.ai_field_email), profile.email, type = FieldType.EMAIL)
+        phoneField = field(getString(R.string.ai_field_phone), profile.phone, type = FieldType.PHONE)
+        addressField = field(getString(R.string.ai_field_address), profile.address, multiline = true)
+        organizationField = field(getString(R.string.ai_field_organization), profile.organization)
         occupationField = field(getString(R.string.ai_field_occupation), profile.occupation)
         toneField = field(getString(R.string.ai_field_tone), profile.tone)
         languagesField = field(getString(R.string.ai_field_languages), profile.languages)
         aboutField = field(getString(R.string.ai_field_about), profile.about, multiline = true)
-        listOf(nameField, occupationField, toneField, languagesField, aboutField)
-            .forEach { root.addView(it) }
+        listOf(
+            nameField, emailField, phoneField, addressField, organizationField,
+            occupationField, toneField, languagesField, aboutField,
+        ).forEach { root.addView(it) }
 
         root.addView(Button(this).apply {
             text = getString(R.string.ai_save_profile)
@@ -107,6 +117,10 @@ class AiSetupActivity : AppCompatActivity() {
         profileStore.save(
             UserProfile(
                 name = nameField.text.toString().trim(),
+                email = emailField.text.toString().trim(),
+                phone = phoneField.text.toString().trim(),
+                address = addressField.text.toString().trim(),
+                organization = organizationField.text.toString().trim(),
                 occupation = occupationField.text.toString().trim(),
                 tone = toneField.text.toString().trim(),
                 languages = languagesField.text.toString().trim(),
@@ -130,10 +144,17 @@ class AiSetupActivity : AppCompatActivity() {
                 statusText.text = when (st) {
                     is ModelManager.State.Downloading ->
                         getString(R.string.ai_downloading, (st.fraction * 100).toInt())
+                    is ModelManager.State.Unpacking ->
+                        getString(R.string.ai_unpacking, (st.fraction * 100).toInt())
                     ModelManager.State.Loading -> getString(R.string.ai_loading)
                     ModelManager.State.Ready -> getString(R.string.ai_ready)
                     is ModelManager.State.Error -> getString(R.string.ai_model_error, st.message)
-                    ModelManager.State.Idle -> ""
+                    ModelManager.State.Idle -> {
+                        val spec = ModelManager.selectedSpec(this@AiSetupActivity)
+                        if (ModelManager.isAvailableOffline(this@AiSetupActivity, spec)) {
+                            getString(R.string.ai_offline_ready)
+                        } else ""
+                    }
                 }
             }
         }
@@ -162,17 +183,27 @@ class AiSetupActivity : AppCompatActivity() {
         setPadding(0, 0, 0, dp(8))
     }
 
-    private fun field(hint: String, value: String, multiline: Boolean = false) = EditText(this).apply {
+    private enum class FieldType { TEXT, EMAIL, PHONE }
+
+    private fun field(
+        hint: String,
+        value: String,
+        multiline: Boolean = false,
+        type: FieldType = FieldType.TEXT,
+    ) = EditText(this).apply {
         this.hint = hint
         setText(value)
         setTextColor(ContextCompat.getColor(this@AiSetupActivity, R.color.kb_text))
         setHintTextColor(ContextCompat.getColor(this@AiSetupActivity, R.color.kb_text_dim))
-        inputType = if (multiline) {
-            InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE or
-                InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
-        } else {
-            InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_WORDS
+        inputType = when {
+            type == FieldType.EMAIL ->
+                InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS
+            type == FieldType.PHONE -> InputType.TYPE_CLASS_PHONE
+            multiline ->
+                InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE or
+                    InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
+            else -> InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_WORDS
         }
-        if (multiline) minLines = 3
+        if (multiline) minLines = 2
     }
 }

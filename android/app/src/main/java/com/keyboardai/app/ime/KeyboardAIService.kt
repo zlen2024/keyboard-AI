@@ -15,6 +15,7 @@ import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
 import android.widget.LinearLayout
 import androidx.core.content.ContextCompat
+import com.keyboardai.app.R
 import com.keyboardai.app.ai.ChatTurn
 import com.keyboardai.app.ai.ModelManager
 import com.keyboardai.app.ai.PromptBuilder
@@ -48,10 +49,26 @@ class KeyboardAIService : InputMethodService(), KeyboardView.Listener, AiBarView
     private var generateJob: Job? = null
     private var attachedImagePath: String? = null
 
+    // Form autofill state
+    private var autofilling = false
+    private var autofillJob: Job? = null
+    /** True while a pending screenshot is meant to feed form autofill (not the ✨ prompt). */
+    private var autofillViaScreenshot = false
+
     private val captureReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             val file = ScreenCapture.captureFile(this@KeyboardAIService)
-            if (file.exists() && file.length() > 0) {
+            val ok = file.exists() && file.length() > 0
+            if (autofillViaScreenshot) {
+                autofillViaScreenshot = false
+                if (ok) {
+                    startAutofill(fieldQuestion(), file.absolutePath)
+                } else {
+                    aiBar?.finishWorking(getString(R.string.ai_autofill_no_capture))
+                }
+                return
+            }
+            if (ok) {
                 attachedImagePath = file.absolutePath
                 aiBar?.setHasImage(true)
             }
@@ -91,10 +108,12 @@ class KeyboardAIService : InputMethodService(), KeyboardView.Listener, AiBarView
     private fun observeModelState() {
         scope.launch {
             ModelManager.state.collect { st ->
-                if (!generating) return@collect
+                if (!generating && !autofilling) return@collect
                 when (st) {
                     is ModelManager.State.Downloading ->
                         aiBar?.setStatus("Downloading model ${(st.fraction * 100).toInt()}%")
+                    is ModelManager.State.Unpacking ->
+                        aiBar?.setStatus("Preparing model ${(st.fraction * 100).toInt()}%")
                     ModelManager.State.Loading -> aiBar?.setStatus("Loading model…")
                     is ModelManager.State.Error -> aiBar?.setStatus("Error: ${st.message}")
                     else -> {}
@@ -105,6 +124,7 @@ class KeyboardAIService : InputMethodService(), KeyboardView.Listener, AiBarView
 
     override fun onStartInputView(info: EditorInfo, restarting: Boolean) {
         super.onStartInputView(info, restarting)
+        cancelAutofill()
         exitAiMode()
         val view = keyboardView ?: return
         view.layer = if (isNumberField(info)) KeyboardLayouts.SYMBOLS else KeyboardLayouts.LETTERS
@@ -119,7 +139,14 @@ class KeyboardAIService : InputMethodService(), KeyboardView.Listener, AiBarView
         super.onFinishInput()
         // A fully dismissed keyboard ends the conversation session.
         memory.clearSession()
+        cancelAutofill()
         exitAiMode()
+    }
+
+    private fun cancelAutofill() {
+        autofillJob?.cancel()
+        autofilling = false
+        autofillViaScreenshot = false
     }
 
     override fun onDestroy() {
@@ -169,6 +196,107 @@ class KeyboardAIService : InputMethodService(), KeyboardView.Listener, AiBarView
             return
         }
         triggerGenerate()
+    }
+
+    /**
+     * One-tap form autofill. Figures out what the focused field is asking and
+     * writes the right value from the user's saved info. If the editor exposes a
+     * label/hint (many sign-up forms) we answer straight away; otherwise — the
+     * common case for Google Forms, where the question is a separate on-screen
+     * element — we grab a screenshot so the vision model can read the question.
+     */
+    override fun onAutofill() {
+        if (autofilling) return
+        if (aiMode) exitAiMode() // autofill writes into the field, not the prompt
+        val question = fieldQuestion()
+        if (question.isNotBlank()) {
+            startAutofill(question, imagePath = null)
+        } else {
+            autofillViaScreenshot = true
+            aiBar?.setWorking(getString(R.string.ai_autofill_reading))
+            startActivity(
+                Intent(this, CaptureActivity::class.java)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            )
+        }
+    }
+
+    private fun startAutofill(question: String, imagePath: String?) {
+        autofillJob?.cancel()
+        autofillJob = scope.launch {
+            autofilling = true
+            aiBar?.setWorking(getString(R.string.ai_autofill_working))
+            val ic = currentInputConnection
+            try {
+                ModelManager.prepare(applicationContext)
+                val system = PromptBuilder.formFillPrompt(profileStore.load(), memory)
+                val instruction = autofillInstruction(question, currentFieldText(), imagePath != null)
+                val answer = StringBuilder()
+                ModelManager.engine()
+                    .generate(system, emptyList(), instruction, imagePath)
+                    .collect { answer.append(it) }
+
+                val value = answer.toString().trim().trim('"').trim()
+                if (value.isEmpty() || value.equals(UNKNOWN_MARKER, ignoreCase = true)) {
+                    aiBar?.finishWorking(getString(R.string.ai_autofill_unknown))
+                } else {
+                    replaceFieldText(ic, value)
+                    if (question.isNotBlank()) memory.addDailyFact("$question → $value")
+                    aiBar?.finishWorking(null)
+                }
+            } catch (c: CancellationException) {
+                throw c
+            } catch (t: Throwable) {
+                aiBar?.finishWorking(getString(R.string.ai_autofill_error, t.message ?: "failed"))
+            } finally {
+                autofilling = false
+            }
+        }
+    }
+
+    /** The instruction message sent to the model for a single form field. */
+    private fun autofillInstruction(question: String, existing: String, hasImage: Boolean): String =
+        buildString {
+            if (question.isNotBlank()) {
+                append("Form field label/question: \"$question\".")
+            } else if (hasImage) {
+                append(
+                    "The attached screenshot shows a form. Identify the question for the " +
+                        "field the user is currently editing (usually the one highlighted or " +
+                        "with an empty input) and answer it."
+                )
+            } else {
+                append("Provide the value for the current form field.")
+            }
+            if (existing.isNotBlank()) {
+                append(" The field currently contains: \"$existing\" — replace it.")
+            }
+            append(" Output only the value to type.")
+        }
+
+    /** Reads the field's own label/hint from the editor, if it provides one. */
+    private fun fieldQuestion(): String {
+        val info = currentInputEditorInfo ?: return ""
+        val hint = info.hintText?.toString()?.trim().orEmpty()
+        if (hint.isNotEmpty()) return hint
+        return info.label?.toString()?.trim().orEmpty()
+    }
+
+    /** The text currently in the focused field (both sides of the cursor). */
+    private fun currentFieldText(): String {
+        val ic = currentInputConnection ?: return ""
+        val before = ic.getTextBeforeCursor(MAX_FIELD_READ, 0)?.toString().orEmpty()
+        val after = ic.getTextAfterCursor(MAX_FIELD_READ, 0)?.toString().orEmpty()
+        return (before + after).trim()
+    }
+
+    /** Replaces whatever is in the field with [value]. */
+    private fun replaceFieldText(ic: android.view.inputmethod.InputConnection?, value: String) {
+        ic ?: return
+        ic.beginBatchEdit()
+        ic.performContextMenuAction(android.R.id.selectAll)
+        ic.commitText(value, 1)
+        ic.endBatchEdit()
     }
 
     private fun exitAiMode() {
@@ -446,5 +574,7 @@ class KeyboardAIService : InputMethodService(), KeyboardView.Listener, AiBarView
         const val DOUBLE_TAP_MS = 300L
         const val DOUBLE_SPACE_MS = 500L
         const val MAX_WORD_LOOKBACK = 48
+        const val MAX_FIELD_READ = 2000
+        const val UNKNOWN_MARKER = "(unknown)"
     }
 }
