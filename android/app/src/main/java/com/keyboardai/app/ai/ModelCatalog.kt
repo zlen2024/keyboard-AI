@@ -42,12 +42,23 @@ data class ModelSpec(
 object ModelCatalog {
 
     /**
-     * Fast, light default — Liquid's newest edge vision+text model (450M).
+     * Default — Liquid's newest-generation LFM2.5-VL 1.6B vision+text model.
      * Downloaded once from Hugging Face on first use, then runs fully offline.
      * The exact GGUF file names are resolved from the repo at download time (see
      * [ModelManager]), so the names below are only a preferred hint — a repo
      * rename or requant won't break the download.
      */
+    val LFM2_5_VL_1_6B = ModelSpec(
+        id = "lfm2.5-vl-1.6b",
+        displayName = "LFM2.5-VL 1.6B (quality)",
+        description = "Newest-gen, ~700 MB–1.2 GB. Strongest writing & vision; needs a recent high-RAM phone.",
+        repo = "LiquidAI/LFM2.5-VL-1.6B-GGUF",
+        modelFile = "LFM2.5-VL-1.6B-Q4_0.gguf",
+        mmprojFile = "mmproj-LFM2.5-VL-1.6B-Q8_0.gguf",
+        approxBytes = 950_000_000L,
+    )
+
+    /** Lighter, faster option for low-RAM phones / quicker first-token. */
     val LFM2_VL_450M = ModelSpec(
         id = "lfm2-vl-450m",
         displayName = "LFM2-VL 450M (fast)",
@@ -58,19 +69,8 @@ object ModelCatalog {
         approxBytes = 340_000_000L,
     )
 
-    /** Heavier, higher-quality option for stronger long-form drafting. */
-    val LFM2_VL_1_6B = ModelSpec(
-        id = "lfm2-vl-1.6b",
-        displayName = "LFM2-VL 1.6B (quality)",
-        description = "~1 GB. Stronger writing; needs a recent high-RAM phone.",
-        repo = "LiquidAI/LFM2-VL-1.6B-GGUF",
-        modelFile = "LFM2-VL-1.6B-Q4_0.gguf",
-        mmprojFile = "mmproj-LFM2-VL-1.6B-Q8_0.gguf",
-        approxBytes = 1_100_000_000L,
-    )
-
-    val all = listOf(LFM2_VL_450M, LFM2_VL_1_6B)
-    val default = LFM2_VL_450M
+    val all = listOf(LFM2_5_VL_1_6B, LFM2_VL_450M)
+    val default = LFM2_5_VL_1_6B
 
     fun byId(id: String?): ModelSpec = all.firstOrNull { it.id == id } ?: default
 }
