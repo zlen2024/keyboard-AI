@@ -43,8 +43,8 @@ Set up your profile (name, email, phone, address, and anything else the AI shoul
 know) and pick a model under **Set up AI assistant** in the app.
 
 - On-device LLM/VLM via the [Liquid LEAP SDK](https://leap.liquid.ai) (llama.cpp
-  backed). Default model **LFM2.5-VL-450M** (newest-gen, ~330 MB, vision+text);
-  optional **LFM2.5-VL-1.6B** for higher quality.
+  backed). Default model **LFM2-VL-450M** (Liquid's edge VLM, ~330 MB, vision+text);
+  optional **LFM2-VL-1.6B** for higher quality.
 - Model weights download once from Hugging Face on first use (the only use of the
   `INTERNET` permission), then run fully offline. The keyboard keeps a small APK
   rather than embedding ~330 MB of weights. (The loader can also use a model
