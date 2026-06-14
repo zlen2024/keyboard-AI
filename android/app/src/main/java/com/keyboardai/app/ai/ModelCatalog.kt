@@ -43,18 +43,19 @@ object ModelCatalog {
 
     /**
      * Fast, light default — newest-generation 450M vision+text model.
-     * Bundled in the APK (see `assets/models/lfm2.5-vl-450m/`), so it powers the
-     * keyboard immediately with no download and no network access.
+     * Downloaded once from Hugging Face on first use, then runs fully offline.
+     * (If its GGUF files are ever dropped into `assets/models/lfm2.5-vl-450m/`
+     * the loader will use those instead and skip the download — see the README
+     * there — but the app does not ship them by default.)
      */
     val LFM2_5_VL_450M = ModelSpec(
         id = "lfm2.5-vl-450m",
-        displayName = "LFM2.5-VL 450M (bundled)",
-        description = "Newest-gen, ~330 MB. Ships in the app — works offline; understands images.",
+        displayName = "LFM2.5-VL 450M (fast)",
+        description = "Newest-gen, ~330 MB. Best speed and battery; understands images.",
         repo = "LiquidAI/LFM2.5-VL-450M-GGUF",
         modelFile = "LFM2.5-VL-450M-Q4_K_M.gguf",
         mmprojFile = "mmproj-LFM2.5-VL-450M-Q8_0.gguf",
         approxBytes = 350_000_000L,
-        bundled = true,
     )
 
     /** Heavier, higher-quality option for stronger long-form drafting. */

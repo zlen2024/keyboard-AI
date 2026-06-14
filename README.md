@@ -45,11 +45,11 @@ know) and pick a model under **Set up AI assistant** in the app.
 - On-device LLM/VLM via the [Liquid LEAP SDK](https://leap.liquid.ai) (llama.cpp
   backed). Default model **LFM2.5-VL-450M** (newest-gen, ~330 MB, vision+text);
   optional **LFM2.5-VL-1.6B** for higher quality.
-- The default **450M model is bundled inside the APK** (under
-  `android/app/src/main/assets/models/`, fetched at build time — see that folder's
-  README), so the keyboard works **fully offline** with no download. The optional
-  1.6B model downloads once from Hugging Face — the only use of the `INTERNET`
-  permission.
+- Model weights download once from Hugging Face on first use (the only use of the
+  `INTERNET` permission), then run fully offline. The keyboard keeps a small APK
+  rather than embedding ~330 MB of weights. (The loader can also use a model
+  pre-placed under `android/app/src/main/assets/models/` — see that folder's
+  README — but the app does not ship one.)
 - A **profile** ("harness") and **session / daily / global memory** let it act
   as a personal assistant that remembers context across uses; every field it
   autofills is also remembered for the rest of the day.

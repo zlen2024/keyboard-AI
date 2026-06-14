@@ -43,8 +43,8 @@
     <string name="ai_save_profile">Save profile</string>
     <string name="ai_profile_saved">Profile saved</string>
     <string name="ai_model_header">AI model</string>
-    <string name="ai_model_caption">The 450M model ships with the app and runs fully offline. The larger model downloads once.</string>
-    <string name="ai_download_model">Prepare / switch model</string>
+    <string name="ai_model_caption">Downloaded once on first use, then runs fully offline. Wi-Fi recommended.</string>
+    <string name="ai_download_model">Download / switch model</string>
     <string name="ai_downloading">Downloading model %1$d%%…</string>
     <string name="ai_unpacking">Preparing model %1$d%%…</string>
     <string name="ai_loading">Loading model…</string>
