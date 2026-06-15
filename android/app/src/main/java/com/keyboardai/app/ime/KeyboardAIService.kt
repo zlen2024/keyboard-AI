@@ -6,6 +6,8 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.inputmethodservice.InputMethodService
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.os.SystemClock
 import android.text.InputType
 import android.view.KeyEvent
@@ -19,10 +21,11 @@ import com.keyboardai.app.R
 import com.keyboardai.app.ai.ChatTurn
 import com.keyboardai.app.ai.ModelManager
 import com.keyboardai.app.ai.PromptBuilder
+import com.keyboardai.app.ai.memory.InfoStore
 import com.keyboardai.app.ai.memory.MemoryStore
-import com.keyboardai.app.ai.memory.ProfileStore
 import com.keyboardai.app.ai.vision.CaptureActivity
 import com.keyboardai.app.ai.vision.ScreenCapture
+import com.keyboardai.app.ai.vision.ScreenCaptureService
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -35,7 +38,7 @@ class KeyboardAIService : InputMethodService(), KeyboardView.Listener, AiBarView
     private var keyboardView: KeyboardView? = null
     private var aiBar: AiBarView? = null
     private lateinit var suggestionEngine: SuggestionEngine
-    private lateinit var profileStore: ProfileStore
+    private lateinit var infoStore: InfoStore
     private lateinit var memory: MemoryStore
 
     private var lastShiftTapTime = 0L
@@ -43,42 +46,32 @@ class KeyboardAIService : InputMethodService(), KeyboardView.Listener, AiBarView
 
     // AI assistant state
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+    private val mainHandler = Handler(Looper.getMainLooper())
     private val promptBuffer = StringBuilder()
     private var aiMode = false
-    private var generating = false
-    private var generateJob: Job? = null
-    private var attachedImagePath: String? = null
+    private var generating = false   // ✨ prompt is streaming
+    private var autofilling = false  // 📝 autofill is running
+    private var aiJob: Job? = null
+    /** Vision is on by default: every prompt is answered against a fresh screenshot. */
+    private var visionEnabled = true
 
-    // Form autofill state
-    private var autofilling = false
-    private var autofillJob: Job? = null
-    /** True while a pending screenshot is meant to feed form autofill (not the ✨ prompt). */
-    private var autofillViaScreenshot = false
+    // The action to run once a screenshot is ready; receives the image path (or null on failure).
+    private var pendingCapture: ((String?) -> Unit)? = null
+    private var captureTimeout: Runnable? = null
 
     private val captureReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
+            val ok = intent?.getBooleanExtra(ScreenCapture.EXTRA_SUCCESS, false) ?: false
             val file = ScreenCapture.captureFile(this@KeyboardAIService)
-            val ok = file.exists() && file.length() > 0
-            if (autofillViaScreenshot) {
-                autofillViaScreenshot = false
-                if (ok) {
-                    startAutofill(fieldQuestion(), file.absolutePath)
-                } else {
-                    aiBar?.finishWorking(getString(R.string.ai_autofill_no_capture))
-                }
-                return
-            }
-            if (ok) {
-                attachedImagePath = file.absolutePath
-                aiBar?.setHasImage(true)
-            }
+            val path = if (ok && file.exists() && file.length() > 0) file.absolutePath else null
+            deliverCapture(path)
         }
     }
 
     override fun onCreate() {
         super.onCreate()
         suggestionEngine = SuggestionEngine(this)
-        profileStore = ProfileStore(this)
+        infoStore = InfoStore(this)
         memory = MemoryStore(this)
         ContextCompat.registerReceiver(
             this,
@@ -95,6 +88,7 @@ class KeyboardAIService : InputMethodService(), KeyboardView.Listener, AiBarView
         }
         val bar = AiBarView(this).also {
             it.listener = this
+            it.setVisionEnabled(visionEnabled)
             aiBar = it
         }
         observeModelState()
@@ -124,8 +118,9 @@ class KeyboardAIService : InputMethodService(), KeyboardView.Listener, AiBarView
 
     override fun onStartInputView(info: EditorInfo, restarting: Boolean) {
         super.onStartInputView(info, restarting)
-        cancelAutofill()
-        exitAiMode()
+        // Don't tear down an in-flight prompt/autofill: the MediaProjection consent
+        // dialog re-triggers this callback when focus returns to the field.
+        if (!isBusy()) exitAiMode()
         val view = keyboardView ?: return
         view.layer = if (isNumberField(info)) KeyboardLayouts.SYMBOLS else KeyboardLayouts.LETTERS
         view.enterLabel = enterLabelFor(info)
@@ -137,20 +132,21 @@ class KeyboardAIService : InputMethodService(), KeyboardView.Listener, AiBarView
 
     override fun onFinishInput() {
         super.onFinishInput()
-        // A fully dismissed keyboard ends the conversation session.
-        memory.clearSession()
-        cancelAutofill()
-        exitAiMode()
+        // A fully dismissed keyboard ends the conversation session — but not while
+        // a prompt/autofill is mid-flight (consent round-trips through here too).
+        if (!isBusy()) {
+            memory.clearSession()
+            exitAiMode()
+        }
     }
 
-    private fun cancelAutofill() {
-        autofillJob?.cancel()
-        autofilling = false
-        autofillViaScreenshot = false
-    }
+    /** True while a prompt/autofill is running or waiting on a screenshot. */
+    private fun isBusy(): Boolean = generating || autofilling || pendingCapture != null
 
     override fun onDestroy() {
         runCatching { unregisterReceiver(captureReceiver) }
+        // Drop the screen projection (and its "casting" indicator) when the keyboard goes away.
+        runCatching { stopService(Intent(this, ScreenCaptureService::class.java)) }
         scope.coroutineContext[Job]?.cancel()
         super.onDestroy()
     }
@@ -173,63 +169,126 @@ class KeyboardAIService : InputMethodService(), KeyboardView.Listener, AiBarView
     override fun onToggleAiMode() {
         aiMode = true
         promptBuffer.clear()
-        attachedImagePath = null
         aiBar?.setAiMode(true)
         keyboardView?.suggestions = emptyList()
     }
 
     override fun onCancel() {
-        generateJob?.cancel()
+        aiJob?.cancel()
+        clearPendingCapture()
         exitAiMode()
     }
 
-    override fun onScreenshot() {
-        if (!aiMode) onToggleAiMode()
-        val intent = Intent(this, CaptureActivity::class.java)
-            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        startActivity(intent)
+    override fun onToggleVision() {
+        visionEnabled = !visionEnabled
+        aiBar?.setVisionEnabled(visionEnabled)
+        if (!visionEnabled) {
+            // Drop the projection (and its "casting" indicator) when vision is off.
+            runCatching { stopService(Intent(this, ScreenCaptureService::class.java)) }
+        }
     }
 
     override fun onGenerate() {
-        if (generating) {
-            generateJob?.cancel()
+        if (generating) {            // tapping ■ stops a stream (or a pending capture)
+            aiJob?.cancel()
+            clearPendingCapture()
+            exitAiMode()
             return
         }
-        triggerGenerate()
+        val prompt = promptBuffer.toString().trim()
+        if (prompt.isEmpty()) return
+        generating = true
+        aiBar?.setGenerating(true)
+        captureThenRun { image -> runGenerate(prompt, image) }
     }
 
     /**
-     * One-tap form autofill. Figures out what the focused field is asking and
-     * writes the right value from the user's saved info. If the editor exposes a
-     * label/hint (many sign-up forms) we answer straight away; otherwise — the
-     * common case for Google Forms, where the question is a separate on-screen
-     * element — we grab a screenshot so the vision model can read the question.
+     * One-tap form autofill: grab a screenshot so the vision model can read the
+     * form question (Google Forms keeps the label in a separate on-screen
+     * element), plus any label the editor exposes, then write the value.
      */
     override fun onAutofill() {
         if (autofilling) return
         if (aiMode) exitAiMode() // autofill writes into the field, not the prompt
-        val question = fieldQuestion()
-        if (question.isNotBlank()) {
-            startAutofill(question, imagePath = null)
+        autofilling = true
+        aiBar?.setWorking(getString(R.string.ai_autofill_working))
+        captureThenRun { image -> runAutofill(fieldQuestion(), image) }
+    }
+
+    // ---- screen capture → model ----
+
+    /** Grabs a fresh screenshot (consent only the first time) then runs [run] with its path. */
+    private fun captureThenRun(run: (String?) -> Unit) {
+        if (!visionEnabled) {
+            run(null)
+            return
+        }
+        pendingCapture = run
+        // Never leave the user stuck if a frame never arrives.
+        val timeout = Runnable { deliverCapture(null) }
+        captureTimeout = timeout
+        mainHandler.postDelayed(timeout, CAPTURE_TIMEOUT_MS)
+
+        if (ScreenCapture.projectionActive) {
+            startService(
+                Intent(this, ScreenCaptureService::class.java).setAction(ScreenCapture.ACTION_CAPTURE)
+            )
         } else {
-            autofillViaScreenshot = true
-            aiBar?.setWorking(getString(R.string.ai_autofill_reading))
             startActivity(
-                Intent(this, CaptureActivity::class.java)
-                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                Intent(this, CaptureActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             )
         }
     }
 
-    private fun startAutofill(question: String, imagePath: String?) {
-        autofillJob?.cancel()
-        autofillJob = scope.launch {
-            autofilling = true
-            aiBar?.setWorking(getString(R.string.ai_autofill_working))
+    private fun deliverCapture(path: String?) {
+        captureTimeout?.let { mainHandler.removeCallbacks(it) }
+        captureTimeout = null
+        val cb = pendingCapture ?: return
+        pendingCapture = null
+        cb(path)
+    }
+
+    private fun clearPendingCapture() {
+        captureTimeout?.let { mainHandler.removeCallbacks(it) }
+        captureTimeout = null
+        pendingCapture = null
+    }
+
+    private fun runGenerate(prompt: String, imagePath: String?) {
+        aiJob?.cancel()
+        aiJob = scope.launch {
             val ic = currentInputConnection
             try {
                 ModelManager.prepare(applicationContext)
-                val system = PromptBuilder.formFillPrompt(profileStore.load(), memory)
+                val system = PromptBuilder.systemPrompt(infoStore.load(), memory)
+                val history = memory.sessionTurns()
+                val answer = StringBuilder()
+                ModelManager.engine()
+                    .generate(system, history, prompt, imagePath)
+                    .collect { chunk ->
+                        answer.append(chunk)
+                        ic?.commitText(chunk, 1)
+                    }
+                memory.recordTurn(ChatTurn(fromUser = true, text = prompt))
+                memory.recordTurn(ChatTurn(fromUser = false, text = answer.toString()))
+                exitAiMode()
+            } catch (c: CancellationException) {
+                throw c
+            } catch (t: Throwable) {
+                aiBar?.setStatus("AI error: ${t.message ?: "failed"}")
+                generating = false
+                aiBar?.setGenerating(false)
+            }
+        }
+    }
+
+    private fun runAutofill(question: String, imagePath: String?) {
+        aiJob?.cancel()
+        aiJob = scope.launch {
+            val ic = currentInputConnection
+            try {
+                ModelManager.prepare(applicationContext)
+                val system = PromptBuilder.formFillPrompt(infoStore.load(), memory)
                 val instruction = autofillInstruction(question, currentFieldText(), imagePath != null)
                 val answer = StringBuilder()
                 ModelManager.engine()
@@ -258,12 +317,11 @@ class KeyboardAIService : InputMethodService(), KeyboardView.Listener, AiBarView
     private fun autofillInstruction(question: String, existing: String, hasImage: Boolean): String =
         buildString {
             if (question.isNotBlank()) {
-                append("Form field label/question: \"$question\".")
+                append("The form field the user is editing is labelled: \"$question\".")
             } else if (hasImage) {
                 append(
-                    "The attached screenshot shows a form. Identify the question for the " +
-                        "field the user is currently editing (usually the one highlighted or " +
-                        "with an empty input) and answer it."
+                    "Use the attached screenshot: identify the form question for the field " +
+                        "the user is currently editing (usually the focused or empty input)."
                 )
             } else {
                 append("Provide the value for the current form field.")
@@ -303,43 +361,8 @@ class KeyboardAIService : InputMethodService(), KeyboardView.Listener, AiBarView
         aiMode = false
         generating = false
         promptBuffer.clear()
-        attachedImagePath = null
         aiBar?.setGenerating(false)
         aiBar?.setAiMode(false)
-    }
-
-    private fun triggerGenerate() {
-        val prompt = promptBuffer.toString().trim()
-        if (prompt.isEmpty()) return
-        val imagePath = attachedImagePath
-
-        generateJob?.cancel()
-        generateJob = scope.launch {
-            generating = true
-            aiBar?.setGenerating(true)
-            val ic = currentInputConnection
-            try {
-                ModelManager.prepare(applicationContext)
-                val system = PromptBuilder.systemPrompt(profileStore.load(), memory)
-                val history = memory.sessionTurns()
-                val answer = StringBuilder()
-                ModelManager.engine()
-                    .generate(system, history, prompt, imagePath)
-                    .collect { chunk ->
-                        answer.append(chunk)
-                        ic?.commitText(chunk, 1)
-                    }
-                memory.recordTurn(ChatTurn(fromUser = true, text = prompt))
-                memory.recordTurn(ChatTurn(fromUser = false, text = answer.toString()))
-                exitAiMode()
-            } catch (c: CancellationException) {
-                throw c
-            } catch (t: Throwable) {
-                aiBar?.setStatus("AI error: ${t.message ?: "failed"}")
-                generating = false
-                aiBar?.setGenerating(false)
-            }
-        }
     }
 
     // ---- KeyboardView.Listener ----
@@ -462,7 +485,7 @@ class KeyboardAIService : InputMethodService(), KeyboardView.Listener, AiBarView
 
     private fun handleEnter() {
         if (isComposingPrompt()) {
-            triggerGenerate()
+            onGenerate()
             return
         }
         learnCurrentWord()
@@ -576,5 +599,8 @@ class KeyboardAIService : InputMethodService(), KeyboardView.Listener, AiBarView
         const val MAX_WORD_LOOKBACK = 48
         const val MAX_FIELD_READ = 2000
         const val UNKNOWN_MARKER = "(unknown)"
+        /** Give up waiting on a screenshot and answer without one after this long
+         *  (generous, to allow for the one-time MediaProjection consent dialog). */
+        const val CAPTURE_TIMEOUT_MS = 15_000L
     }
 }

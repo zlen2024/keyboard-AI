@@ -1,10 +1,14 @@
 package com.keyboardai.app.ai
 
 import android.content.Context
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -14,68 +18,74 @@ import java.net.HttpURLConnection
 import java.net.URL
 
 /**
- * Owns model files on disk and the single in-memory [AiEngine]. Both the
- * keyboard (IME) and the setup app talk to this one object; state is exposed as
- * a [StateFlow] so either side can react to download/load progress.
+ * Owns the single model's files on disk and the in-memory [AiEngine]. The
+ * keyboard (IME), the launcher and the setup screen all talk to this one
+ * object; state is exposed as a [StateFlow] so any of them can react to
+ * download/load progress.
  */
 object ModelManager {
 
     sealed interface State {
         data object Idle : State
         data class Downloading(val fraction: Float) : State
-        /** Copying bundled weights out of the APK into private storage (first run). */
+        /** Copying pre-bundled weights out of the APK into private storage (first run). */
         data class Unpacking(val fraction: Float) : State
         data object Loading : State
         data object Ready : State
         data class Error(val message: String) : State
     }
 
-    private const val PREFS = "ai_settings"
-    private const val KEY_SELECTED = "selected_model"
+    /** The one model the app uses. */
+    val spec: ModelSpec get() = ModelCatalog.MODEL
 
     private val engine: AiEngine = LeapAiEngine()
     private val mutex = Mutex()
+    private val managerScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private var prepareJob: Job? = null
 
     private val _state = MutableStateFlow<State>(State.Idle)
     val state: StateFlow<State> = _state.asStateFlow()
 
     val isReady: Boolean get() = engine.isLoaded
 
-    fun selectedSpec(context: Context): ModelSpec =
-        ModelCatalog.byId(prefs(context).getString(KEY_SELECTED, null))
-
-    fun setSelectedSpec(context: Context, spec: ModelSpec) {
-        prefs(context).edit().putString(KEY_SELECTED, spec.id).apply()
+    /** True once the weights are present in private storage (downloaded or unpacked). */
+    fun isReadyOnDisk(context: Context): Boolean {
+        val model = modelFile(context)
+        val mmproj = mmprojFile(context)
+        return model.exists() && model.length() > 0 && mmproj.exists() && mmproj.length() > 0
     }
 
-    /** True once the weights are present in private storage (extracted or downloaded). */
-    fun isReadyOnDisk(context: Context, spec: ModelSpec): Boolean {
-        val model = modelFile(context, spec)
-        val mmproj = mmprojFile(context, spec)
-        return model.exists() && model.length() > 0 &&
-            (mmproj == null || (mmproj.exists() && mmproj.length() > 0))
-    }
+    /** True when the model can be made ready with no network: already on disk, or bundled in the APK. */
+    fun isAvailableOffline(context: Context): Boolean =
+        isReadyOnDisk(context) || hasBundledAssets(context)
 
-    /** True when this model can be made ready with no network: already on disk, or bundled in the APK. */
-    fun isAvailableOffline(context: Context, spec: ModelSpec): Boolean =
-        isReadyOnDisk(context, spec) || hasBundledAssets(context, spec)
+    /**
+     * Kick off download + load on a long-lived app scope (survives the launcher
+     * Activity being closed), so the model is ready when the keyboard needs it.
+     * Idempotent: a no-op if already loaded or already in progress.
+     */
+    fun startPreparing(context: Context) {
+        if (isReady) return
+        if (prepareJob?.isActive == true) return
+        val app = context.applicationContext
+        prepareJob = managerScope.launch { runCatching { prepare(app) } }
+    }
 
     /** Make the weights available (extract from assets, or download), then load. Idempotent. */
-    suspend fun prepare(context: Context, spec: ModelSpec = selectedSpec(context)) {
+    suspend fun prepare(context: Context) {
         mutex.withLock {
-            if (engine.isLoaded) return
+            if (engine.isLoaded) {
+                _state.value = State.Ready
+                return
+            }
             try {
-                if (!isReadyOnDisk(context, spec)) {
-                    if (hasBundledAssets(context, spec)) {
-                        unpackBundled(context, spec)
-                    } else {
-                        download(context, spec)
-                    }
+                if (!isReadyOnDisk(context)) {
+                    if (hasBundledAssets(context)) unpackBundled(context) else download(context)
                 }
                 _state.value = State.Loading
                 engine.load(
-                    modelPath = modelFile(context, spec).absolutePath,
-                    mmprojPath = mmprojFile(context, spec)?.absolutePath,
+                    modelPath = modelFile(context).absolutePath,
+                    mmprojPath = mmprojFile(context).absolutePath,
                     cpuThreads = recommendedThreads(),
                     contextSize = CONTEXT_SIZE,
                 )
@@ -87,27 +97,19 @@ object ModelManager {
         }
     }
 
-    /** Switch to a different model: unload the old one and load the new. */
-    suspend fun switchTo(context: Context, spec: ModelSpec) {
-        setSelectedSpec(context, spec)
-        mutex.withLock { engine.unload() }
-        prepare(context, spec)
-    }
-
     fun engine(): AiEngine = engine
 
-    // ---- bundled assets (offline, shipped in the APK) ----
+    // ---- pre-bundled assets (optional offline build) ----
 
-    /** True when this model's GGUF files are packaged under `assets/<assetDir>/`. */
-    fun hasBundledAssets(context: Context, spec: ModelSpec): Boolean {
+    /** True when the model's GGUF files are packaged under `assets/<assetDir>/`. */
+    fun hasBundledAssets(context: Context): Boolean {
         val names = runCatching {
             context.applicationContext.assets.list(spec.assetDir)?.toSet().orEmpty()
         }.getOrDefault(emptySet())
-        return spec.modelFile in names && (spec.mmprojFile == null || spec.mmprojFile in names)
+        return spec.modelFile in names && spec.mmprojFile in names
     }
 
-    /** Copy bundled weights out of the (compressed-free) APK into private storage once. */
-    private suspend fun unpackBundled(context: Context, spec: ModelSpec) = withContext(Dispatchers.IO) {
+    private suspend fun unpackBundled(context: Context) = withContext(Dispatchers.IO) {
         val total = spec.approxBytes.coerceAtLeast(1)
         var copied = 0L
         _state.value = State.Unpacking(0f)
@@ -129,15 +131,14 @@ object ModelManager {
             }
         }
 
-        modelDir(context, spec).mkdirs()
-        extract(spec.modelFile, modelFile(context, spec))
-        val mmproj = mmprojFile(context, spec)
-        if (spec.mmprojFile != null && mmproj != null) extract(spec.mmprojFile, mmproj)
+        modelDir(context).mkdirs()
+        extract(spec.modelFile, modelFile(context))
+        extract(spec.mmprojFile, mmprojFile(context))
     }
 
-    // ---- download (optional models not shipped in the APK) ----
+    // ---- download ----
 
-    private suspend fun download(context: Context, spec: ModelSpec) = withContext(Dispatchers.IO) {
+    private suspend fun download(context: Context) = withContext(Dispatchers.IO) {
         val total = spec.approxBytes.coerceAtLeast(1)
         var downloaded = 0L
         _state.value = State.Downloading(0f)
@@ -151,25 +152,22 @@ object ModelManager {
 
         // Ask the repo what it actually contains rather than trusting hard-coded
         // file names (which drift when a model is requantized or renamed).
-        val (modelRemote, mmprojRemote) = resolveRemoteFiles(spec)
+        val (modelRemote, mmprojRemote) = resolveRemoteFiles()
 
-        modelDir(context, spec).mkdirs()
-        fetch(hfResolveUrl(spec.repo, modelRemote), modelFile(context, spec))
-        val mmprojDest = mmprojFile(context, spec)
-        if (spec.mmprojFile != null && mmprojRemote != null && mmprojDest != null) {
-            fetch(hfResolveUrl(spec.repo, mmprojRemote), mmprojDest)
-        }
+        modelDir(context).mkdirs()
+        fetch(hfResolveUrl(spec.repo, modelRemote), modelFile(context))
+        fetch(hfResolveUrl(spec.repo, mmprojRemote), mmprojFile(context))
     }
 
     private fun hfResolveUrl(repo: String, rfilename: String) =
         "https://huggingface.co/$repo/resolve/main/$rfilename?download=true"
 
     /**
-     * Resolves the real `(model, mmproj)` file names in [spec]'s repo via the
-     * Hugging Face API, picking the preferred quant. Falls back to the names
-     * declared on [spec] if the listing can't be fetched.
+     * Resolves the real `(model, mmproj)` file names in the repo via the Hugging
+     * Face API, picking the preferred quant. Falls back to the declared names if
+     * the listing can't be fetched.
      */
-    private fun resolveRemoteFiles(spec: ModelSpec): Pair<String, String?> {
+    private fun resolveRemoteFiles(): Pair<String, String> {
         val ggufs = listRepoFiles(spec.repo).filter { it.endsWith(".gguf", ignoreCase = true) }
         if (ggufs.isEmpty()) return spec.modelFile to spec.mmprojFile
 
@@ -180,13 +178,10 @@ object ModelManager {
             modelFiles.firstOrNull { it.contains(q, ignoreCase = true) }
         } ?: modelFiles.firstOrNull() ?: spec.modelFile
 
-        val mmproj = if (spec.mmprojFile == null) {
-            null
-        } else {
-            MMPROJ_QUANT_PREFERENCE.firstNotNullOfOrNull { q ->
-                mmprojFiles.firstOrNull { it.contains(q, ignoreCase = true) }
-            } ?: mmprojFiles.firstOrNull() ?: spec.mmprojFile
-        }
+        val mmproj = MMPROJ_QUANT_PREFERENCE.firstNotNullOfOrNull { q ->
+            mmprojFiles.firstOrNull { it.contains(q, ignoreCase = true) }
+        } ?: mmprojFiles.firstOrNull() ?: spec.mmprojFile
+
         return model to mmproj
     }
 
@@ -273,17 +268,12 @@ object ModelManager {
 
     // ---- paths & helpers ----
 
-    private fun prefs(context: Context) =
-        context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-
-    private fun modelDir(context: Context, spec: ModelSpec) =
+    private fun modelDir(context: Context) =
         File(context.applicationContext.filesDir, "models/${spec.id}")
 
-    private fun modelFile(context: Context, spec: ModelSpec) =
-        File(modelDir(context, spec), spec.modelFile)
+    private fun modelFile(context: Context) = File(modelDir(context), spec.modelFile)
 
-    private fun mmprojFile(context: Context, spec: ModelSpec): File? =
-        spec.mmprojFile?.let { File(modelDir(context, spec), it) }
+    private fun mmprojFile(context: Context) = File(modelDir(context), spec.mmprojFile)
 
     private fun recommendedThreads(): Int =
         Runtime.getRuntime().availableProcessors().coerceIn(2, 6)
@@ -295,5 +285,5 @@ object ModelManager {
         listOf("Q4_K_M", "Q4_K_S", "Q4_0", "Q5_K_M", "Q5_0", "Q6_K", "Q8_0", "F16")
 
     /** The vision projector is small; prefer higher precision. */
-    private val MMPROJ_QUANT_PREFERENCE = listOf("Q8_0", "F16", "f16", "Q6_K")
+    private val MMPROJ_QUANT_PREFERENCE = listOf("Q8_0", "F16", "Q6_K")
 }
