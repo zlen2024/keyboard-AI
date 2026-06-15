@@ -26,35 +26,36 @@ context-aware enter key, and a globe key to switch keyboards.
 
 ## AI assistant (Android)
 
-Keyboard AI can generate text for you on-device, and **fill in forms** from the
-info you've saved about yourself.
+Keyboard AI sees your screen and helps you write and **fill in forms** from the
+info you've saved about yourself — powered by one bundled vision model.
 
-- **Ask (✨)** — tap **✨** on the bar above the keys, type a prompt, and hit
-  **➤**; the reply streams straight into whatever app you're in. Tap **📷** to
-  attach a screenshot and ask about what's on screen.
+- **Vision is always on (👁)** — every prompt is answered against a fresh
+  screenshot of your screen, so the model understands the app, form, or
+  conversation you're in. Tap **👁** on the bar to turn it off (becomes 🚫).
+- **Ask (✨)** — tap **✨**, type a prompt, hit **➤**; the reply (grounded in what's
+  on screen) streams straight into whatever app you're in.
 - **Autofill (📝)** — tap **📝** while a form field is focused and the keyboard
-  writes the right value for that field. If the field has a label/hint it answers
-  instantly; otherwise — the usual case for **Google Forms**, where the question
-  is a separate element on screen — it takes a quick screenshot so the vision
-  model can read the question, then fills the answer. Re-filling the same form
-  later is one tap per field.
+  reads the on-screen question (the usual case for **Google Forms**, where the
+  label is a separate element) and writes the right value from your saved info.
+  Re-filling the same form later is one tap per field.
 
-Set up your profile (name, email, phone, address, and anything else the AI should
-know) and pick a model under **Set up AI assistant** in the app.
+Under **Set up AI assistant** you keep a free-form **key/value list** of anything
+the AI should know about you (name, email, ID numbers, preferences…). No fixed
+schema — add whatever you like.
 
-- On-device LLM/VLM via the [Liquid LEAP SDK](https://leap.liquid.ai) (llama.cpp
-  backed). Default model **LFM2.5-VL-1.6B** (Liquid's newest-gen edge VLM,
-  ~0.7–1.2 GB, vision+text); lighter **LFM2-VL-450M** (~330 MB) for low-RAM phones.
-- Model weights download once from Hugging Face on first use (the only use of the
-  `INTERNET` permission), then run fully offline. The keyboard keeps a small APK
-  rather than embedding ~330 MB of weights. (The loader can also use a model
-  pre-placed under `android/app/src/main/assets/models/` — see that folder's
-  README — but the app does not ship one.)
-- A **profile** ("harness") and **session / daily / global memory** let it act
-  as a personal assistant that remembers context across uses; every field it
-  autofills is also remembered for the rest of the day.
-- Screenshots use Android's MediaProjection (a one-time per-session consent
-  prompt). Scrolling screenshots are not yet supported.
+- One on-device VLM via the [Liquid LEAP SDK](https://leap.liquid.ai) (llama.cpp
+  backed): **LFM2.5-VL-1.6B** (Liquid's newest-gen edge vision-language model,
+  ~0.7–1.2 GB).
+- The model **downloads automatically on first launch** from Hugging Face (the
+  only use of the `INTERNET` permission), then runs fully offline. Keep the app
+  open on Wi-Fi while it downloads. (The loader can also use a model pre-placed
+  under `android/app/src/main/assets/models/` — see that folder's README.)
+- A **key/value profile** plus **session / daily / global memory** let it act as a
+  personal assistant that remembers context across uses; every field it autofills
+  is also remembered for the rest of the day.
+- Vision uses Android's MediaProjection: you grant consent **once** when first
+  prompting in a keyboard session, and a "casting" indicator shows while it's on.
+  Scrolling screenshots are not yet supported.
 - **Requires Android 12+ (API 31)** and an arm64 device — required by the model
   runtime. Normal typing still works on the keyboard regardless.
 - iOS keyboards can't host a model this size (OS memory limit), so AI features

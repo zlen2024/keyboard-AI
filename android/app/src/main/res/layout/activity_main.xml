@@ -30,6 +30,15 @@
             android:textSize="15sp" />
 
         <TextView
+            android:id="@+id/model_status_text"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:text="@string/ai_model_preparing"
+            android:textColor="@color/brand_primary"
+            android:textSize="14sp" />
+
+        <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginTop="32dp"

@@ -1,57 +1,57 @@
 package com.keyboardai.app.ai
 
+import com.keyboardai.app.ai.memory.InfoEntry
 import com.keyboardai.app.ai.memory.MemoryStore
-import com.keyboardai.app.ai.memory.UserProfile
 
 /**
  * Assembles the system prompt the model sees on every request: a fixed persona
- * plus the user's profile and the global/daily memory tiers. Kept compact on
- * purpose — short context means faster first-token on-device.
+ * plus the user's free-form key/value info and the global/daily memory tiers.
+ * Every request also carries a screenshot of the user's screen, so the persona
+ * tells the model to ground its answer in what it sees.
  */
 object PromptBuilder {
 
     private const val PERSONA =
-        "You are Keyboard AI, a concise on-device writing assistant living in the " +
-            "user's keyboard. You write text the user will send in other apps, so " +
-            "reply with only the requested text — no preamble, no quotes, no markdown " +
-            "unless asked. Match the user's language and the requested tone. When a " +
-            "screenshot is provided, ground your answer in what it shows."
+        "You are Keyboard AI, a concise on-device assistant living in the user's " +
+            "keyboard. A screenshot of the user's current screen is attached to every " +
+            "message — read it to understand the context (the app, the form, the field " +
+            "or conversation the user is in). You write text the user will send in other " +
+            "apps, so reply with only the requested text — no preamble, no quotes, no " +
+            "markdown unless asked. Match the user's language and tone."
 
     private const val FORM_FILL_PERSONA =
-        "You are Keyboard AI's form autofill. You help the user complete a form " +
-            "field using the facts they have saved about themselves. You are given " +
-            "the field's question/label (and sometimes a screenshot of the form). " +
-            "Reply with ONLY the exact value to type into that one field — no label, " +
-            "no quotes, no explanation, no trailing punctuation. If the answer is a " +
-            "known fact about the user (name, email, phone, address, etc.), output it " +
-            "verbatim. If it is an open question (e.g. feedback, a reason, a comment), " +
-            "write a short, plausible answer in the user's voice and tone. If you " +
-            "genuinely cannot tell what to put, reply with exactly: (unknown)"
+        "You are Keyboard AI's form autofill. A screenshot of the user's screen is " +
+            "attached. Identify the form field the user is currently editing (usually the " +
+            "focused/empty input) and the question or label next to it, then reply with " +
+            "ONLY the exact value to type into that one field — no label, no quotes, no " +
+            "explanation, no trailing punctuation. If the answer is a known fact about the " +
+            "user (from their saved info below), output it verbatim. If it is an open " +
+            "question (feedback, a reason, a comment), write a short plausible answer in " +
+            "the user's voice. If you genuinely cannot tell, reply with exactly: (unknown)"
 
-    /** General writing assistant prompt (the ✨ prompt bar). */
-    fun systemPrompt(profile: UserProfile, memory: MemoryStore): String = buildString {
+    /** General assistant prompt (the ✨ prompt bar). */
+    fun systemPrompt(info: List<InfoEntry>, memory: MemoryStore): String = buildString {
         append(PERSONA)
-        appendUserContext(profile, memory)
+        appendUserContext(info, memory)
     }
 
     /** Specialized prompt for one-tap form autofill (the 📝 action). */
-    fun formFillPrompt(profile: UserProfile, memory: MemoryStore): String = buildString {
+    fun formFillPrompt(info: List<InfoEntry>, memory: MemoryStore): String = buildString {
         append(FORM_FILL_PERSONA)
-        appendUserContext(profile, memory)
+        appendUserContext(info, memory)
     }
 
-    private fun StringBuilder.appendUserContext(profile: UserProfile, memory: MemoryStore) {
-        if (!profile.isEmpty) {
-            append("\n\nAbout the user:")
-            if (profile.name.isNotBlank()) append("\n- Name: ${profile.name}")
-            if (profile.email.isNotBlank()) append("\n- Email: ${profile.email}")
-            if (profile.phone.isNotBlank()) append("\n- Phone: ${profile.phone}")
-            if (profile.address.isNotBlank()) append("\n- Address: ${profile.address}")
-            if (profile.organization.isNotBlank()) append("\n- Organization: ${profile.organization}")
-            if (profile.occupation.isNotBlank()) append("\n- Occupation: ${profile.occupation}")
-            if (profile.tone.isNotBlank()) append("\n- Preferred tone: ${profile.tone}")
-            if (profile.languages.isNotBlank()) append("\n- Languages: ${profile.languages}")
-            if (profile.about.isNotBlank()) append("\n- Notes: ${profile.about}")
+    private fun StringBuilder.appendUserContext(info: List<InfoEntry>, memory: MemoryStore) {
+        val facts = info.filter { it.key.isNotBlank() || it.value.isNotBlank() }
+        if (facts.isNotEmpty()) {
+            append("\n\nWhat the user told you about themselves:")
+            facts.forEach { entry ->
+                when {
+                    entry.key.isBlank() -> append("\n- ${entry.value}")
+                    entry.value.isBlank() -> append("\n- ${entry.key}")
+                    else -> append("\n- ${entry.key}: ${entry.value}")
+                }
+            }
         }
 
         val global = memory.globalFacts()

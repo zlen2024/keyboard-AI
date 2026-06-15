@@ -23,8 +23,8 @@ class AiBarView(context: Context) : LinearLayout(context) {
         fun onToggleAiMode()
         fun onGenerate()
         fun onCancel()
-        fun onScreenshot()
         fun onAutofill()
+        fun onToggleVision()
     }
 
     var listener: Listener? = null
@@ -32,13 +32,13 @@ class AiBarView(context: Context) : LinearLayout(context) {
     private val promptText: TextView
     private val leadingButton: TextView
     private val autofillButton: TextView
-    private val screenshotButton: TextView
+    private val visionButton: TextView
     private val actionButton: TextView
 
     private var aiMode = false
     private var generating = false
-    private var hasImage = false
-    /** A blocking task (form autofill / model load) is running; buttons are locked. */
+    private var visionOn = true
+    /** A blocking task (form autofill, model load) is running; buttons are locked. */
     private var working = false
     /** A pinned message (working status, result, or error) shown until the next interaction. */
     private var statusMsg: String? = null
@@ -72,8 +72,8 @@ class AiBarView(context: Context) : LinearLayout(context) {
             layoutParams = lp
             setOnClickListener { if (!aiMode) listener?.onToggleAiMode() }
         }
-        screenshotButton = pillButton("📷").apply {
-            setOnClickListener { listener?.onScreenshot() }
+        visionButton = pillButton("👁").apply {
+            setOnClickListener { listener?.onToggleVision() }
         }
         actionButton = pillButton("➤").apply {
             setOnClickListener { listener?.onGenerate() }
@@ -82,7 +82,7 @@ class AiBarView(context: Context) : LinearLayout(context) {
         addView(leadingButton)
         addView(autofillButton)
         addView(promptText)
-        addView(screenshotButton)
+        addView(visionButton)
         addView(actionButton)
         render()
     }
@@ -104,15 +104,7 @@ class AiBarView(context: Context) : LinearLayout(context) {
     fun setAiMode(active: Boolean) {
         aiMode = active
         statusMsg = null
-        if (!active) {
-            generating = false
-            hasImage = false
-        }
-        render()
-    }
-
-    fun setHasImage(value: Boolean) {
-        hasImage = value
+        if (!active) generating = false
         render()
     }
 
@@ -128,16 +120,18 @@ class AiBarView(context: Context) : LinearLayout(context) {
         render()
     }
 
+    fun setVisionEnabled(value: Boolean) {
+        visionOn = value
+        render()
+    }
+
     /** Shows a transient status (download %, errors) without changing the working state. */
     fun setStatus(status: String?) {
         statusMsg = status
         render()
     }
 
-    /**
-     * Marks a blocking task (form autofill, model load) as running and pins its
-     * [message]. Buttons are locked until [finishWorking] is called.
-     */
+    /** Marks a blocking task (autofill, model load) as running and pins its [message]. */
     fun setWorking(message: String) {
         working = true
         statusMsg = message
@@ -153,11 +147,11 @@ class AiBarView(context: Context) : LinearLayout(context) {
 
     private fun render() {
         leadingButton.text = if (aiMode) "✕" else "✨"
-        // 📝 autofill is available whenever no task is running.
-        autofillButton.visibility = if (working || generating) View.GONE else View.VISIBLE
+        autofillButton.visibility = if (working || generating || aiMode) View.GONE else View.VISIBLE
         actionButton.visibility = if (aiMode && !working) View.VISIBLE else View.GONE
-        screenshotButton.visibility = if (aiMode && !generating && !working) View.VISIBLE else View.GONE
-        screenshotButton.text = if (hasImage) "🖼️" else "📷"
+        visionButton.visibility = if (working || generating) View.GONE else View.VISIBLE
+        visionButton.text = if (visionOn) "👁" else "🚫"
+        visionButton.alpha = if (visionOn) 1f else 0.5f
         actionButton.text = if (generating) "■" else "➤"
         actionButton.setTextColor(
             ContextCompat.getColor(
